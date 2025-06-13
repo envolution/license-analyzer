@@ -195,6 +195,7 @@ class TestLicenseAnalyzer(unittest.TestCase):
             )
 
     # CORRECTED: Patch sentence_transformers.util and sentence_transformers.SentenceTransformer
+    @patch("license_analyzer.core.LicenseDatabase._get_embedding")
     @patch("sentence_transformers.util")
     @patch("sentence_transformers.SentenceTransformer")
     def test_analyze_text_exact_match(self, mock_transformer, mock_util):
@@ -208,7 +209,9 @@ class TestLicenseAnalyzer(unittest.TestCase):
         # to have them patched if the analyzer *might* try to use them.
 
         # Test exact match
-        mit_content = "MIT License\n\nCopyright (c) 2024" # This content should match MIT.txt
+        mit_content = (
+            "MIT License\n\nCopyright (c) 2024"  # This content should match MIT.txt
+        )
         matches = self.analyzer.analyze_text(mit_content)
 
         self.assertGreater(len(matches), 0)
@@ -216,7 +219,6 @@ class TestLicenseAnalyzer(unittest.TestCase):
         perfect_matches = [m for m in matches if m.score == 1.0]
         self.assertGreater(len(perfect_matches), 0)
         self.assertEqual(perfect_matches[0].method, MatchMethod.SHA256)
-
 
     def test_analyze_file_not_found(self):
         """Test analyzing non-existent file."""
@@ -234,12 +236,18 @@ class TestLicenseAnalyzer(unittest.TestCase):
     # CORRECTED: Patch sentence_transformers.util and sentence_transformers.SentenceTransformer
     @patch("sentence_transformers.util")
     @patch("sentence_transformers.SentenceTransformer")
-    def test_analyze_multiple_files(self, mock_transformer, mock_util):
+    def test_analyze_multiple_files(
+        self, mock_transformer, mock_util, mock_get_embedding
+    ):
         """Test analyzing multiple files."""
         mock_model = Mock()
         mock_model.encode.return_value = np.array([0.1, 0.2, 0.3])
         mock_transformer.return_value = mock_model
-        mock_util.cos_sim.return_value = [[0.8]] # Ensure util is properly mocked for cos_sim
+        mock_util.cos_sim.return_value = [
+            [0.8]
+        ]  # Ensure util is properly mocked for cos_sim
+
+        mock_get_embedding.return_value = np.array([0.9, 0.8, 0.7])
 
         # Create test files
         file1 = Path(self.temp_dir) / "license1.txt"
@@ -255,8 +263,7 @@ class TestLicenseAnalyzer(unittest.TestCase):
 
         # Assert that SentenceTransformer.encode was called for both files,
         # and util.cos_sim was called for each comparison if similarity is needed.
-        self.assertEqual(mock_model.encode.call_count, 2) # Once for each file text
-
+        self.assertEqual(mock_model.encode.call_count, 2)  # Once for each file text
 
     def test_get_database_stats(self):
         """Test getting database statistics."""
@@ -282,7 +289,7 @@ class TestConvenienceFunctions(unittest.TestCase):
         # Create test license
         (self.spdx_dir / "MIT.txt").write_text("MIT License\n\nTest content")
 
-    @patch("license_analyzer.LicenseAnalyzer")
+    @patch("license_analyzer.core.LicenseAnalyzer")
     def test_analyze_license_file_function(self, mock_analyzer_class):
         """Test analyze_license_file convenience function."""
         mock_analyzer = Mock()
@@ -300,7 +307,7 @@ class TestConvenienceFunctions(unittest.TestCase):
         mock_analyzer.analyze_file.assert_called_once_with(test_file, 3)
         self.assertEqual(len(matches), 1)
 
-    @patch("license_analyzer.LicenseAnalyzer")
+    @patch("license_analyzer.core.LicenseAnalyzer")
     def test_analyze_license_text_function(self, mock_analyzer_class):
         """Test analyze_license_text convenience function."""
         mock_analyzer = Mock()
@@ -340,7 +347,7 @@ class TestIntegration(unittest.TestCase):
         # Create directory structure
         self.spdx_dir.mkdir(parents=True)
         self.exceptions_dir.mkdir(parents=True)
-        self.cache_dir.mkdir(parents=True) # Ensure cache dir is created for analyzer
+        self.cache_dir.mkdir(parents=True)  # Ensure cache dir is created for analyzer
 
         # Create realistic license content
         mit_license = """MIT License
@@ -387,7 +394,9 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
         # Realistic embedding size might be 384 for all-MiniLM-L6-v2, but 3 is fine for a mock
         mock_model.encode.return_value = np.array([0.1, 0.2, 0.3])
         mock_transformer.return_value = mock_model
-        mock_util.cos_sim.return_value = np.array([[0.85]]) # cos_sim returns a 2D numpy array
+        mock_util.cos_sim.return_value = np.array(
+            [[0.85]]
+        )  # cos_sim returns a 2D numpy array
 
         # Initialize analyzer
         analyzer = LicenseAnalyzer(spdx_dir=self.spdx_dir, cache_dir=self.cache_dir)
@@ -402,7 +411,6 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
         self.assertGreater(len(exact_matches), 0)
         self.assertEqual(exact_matches[0].name, "MIT.txt")
         self.assertEqual(exact_matches[0].method, MatchMethod.SHA256)
-
 
         # Test similarity match
         # This content is similar to MIT but not an exact SHA256/fingerprint match.
