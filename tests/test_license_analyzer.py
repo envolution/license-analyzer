@@ -130,7 +130,7 @@ SOFTWARE."""
         text_sha = self.db._sha256sum_text("test content")
         self.assertEqual(sha, text_sha)
 
-    @patch("license_analyzer.core.SentenceTransformer")
+    @patch("sentence_transformers.SentenceTransformer")
     def test_embedding_model_lazy_loading(self, mock_transformer):
         """Test that embedding model is loaded lazily."""
         mock_model = Mock()
@@ -143,6 +143,10 @@ SOFTWARE."""
         model = self.db.embedding_model
         self.assertIsNotNone(model)
         mock_transformer.assert_called_once_with("all-MiniLM-L6-v2")
+
+        self.assertEqual(model, mock_model)
+
+        self.assertIsNotNone(self.db._embedding_model)
 
     def test_database_loading(self):
         """Test database loading and updating."""
