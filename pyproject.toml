@@ -23,6 +23,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Legal",
   "Topic :: Utilities",
 ]
 dependencies = [
@@ -30,13 +31,14 @@ dependencies = [
   "sentence-transformers>=2.0.0",
   "torch>=1.9.0",
   "transformers>=4.0.0",
-  "requests>=2.0.0",              # NEW
-  "appdirs>=1.4.4",               # NEW
+  "requests>=2.0.0",
+  "appdirs>=1.4.4",
+  "rich>=12.0.0",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/yourusername/license-analyzer"
-"Bug Tracker" = "https://github.com/yourusername/license-analyzer/issues"
+"Homepage" = "https://github.com/envolution/license-analyzer"
+"Bug Tracker" = "https://github.com/envolution/license-analyzer/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -50,10 +52,8 @@ dev = [
 ]
 
 [project.scripts]
-# This defines the console script entry point
 "license-analyzer" = "license_analyzer.cli:main"
 
-# Tells setuptools to automatically find packages in the standard layout
 [tool.setuptools.packages]
 find = {}
 
@@ -95,7 +95,7 @@ python_functions = ["test_*"]
 addopts = "--cov=license_analyzer --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]
-source = ["license_analyzer"]    # Point to the package directory
+source = ["license_analyzer"]
 omit = ["*/tests/*", "*/test_*"]
 
 [tool.coverage.report]

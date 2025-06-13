@@ -7,7 +7,8 @@ Example usage:
     python -m license_analyzer.cli single_license.txt
     python -m license_analyzer.cli license1.txt license2.txt license3.txt
     license-analyzer --top-n 10 --format json license.txt
-    license-analyzer --update # Force update license data
+    license-analyzer --update --verbose # Force update and show details
+    license-analyzer --spdx-dir /custom/spdx/path LICENSE
 """
 
 import argparse
@@ -15,12 +16,22 @@ import json
 import sys
 from pathlib import Path
 from typing import List
-import logging # Already present, but explicit
+import logging
+import contextlib # For redirect_stdout/stderr if needed for mocking
 
 # Adjusted import to reflect package structure
 from license_analyzer.core import LicenseAnalyzer, LicenseMatch
-from license_analyzer.updater import LicenseUpdater # NEW import
-from appdirs import user_cache_dir # NEW import
+from license_analyzer.updater import LicenseUpdater
+from appdirs import user_cache_dir
+
+# NEW: Rich imports
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn, TransferSpeedColumn
+from rich.status import Status
+from rich.live import Live
+from rich.padding import Padding
+from rich.logging import RichHandler
+
 
 # Default paths now managed by appdirs
 APP_NAME = "license-analyzer"
@@ -29,20 +40,34 @@ DEFAULT_CACHE_BASE_DIR = Path(user_cache_dir(appname=APP_NAME, appauthor=APP_AUT
 DEFAULT_SPDX_DATA_DIR = DEFAULT_CACHE_BASE_DIR / "spdx"
 DEFAULT_DB_CACHE_DIR = DEFAULT_CACHE_BASE_DIR / "db_cache"
 
+# Initialize Rich Console
+console = Console()
+
+# Configure logging to use RichHandler for better output in verbose mode
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    handlers=[RichHandler(console=console, show_time=True, show_level=True,
+                          show_path=False, enable_terminal_markup=True)]
+)
+logger = logging.getLogger(__name__) # Use standard logger, RichHandler formats it
+
 
 def format_text_output(file_path: str, matches: List[LicenseMatch]) -> str:
     """Format matches as human-readable text."""
-    output = [f"Analysis results for: {file_path}"]
-    output.append("=" * 60)
+    output = [f"[bold green]Analysis results for: {file_path}[/bold green]"]
+    output.append("-" * 60) # Changed to dashes for consistency with Rich styling
 
     if matches:
         for match in matches:
+            # Use Rich markup for colored output
+            score_color = "red" if match.score < 0.7 else ("yellow" if match.score < 0.9 else "green")
             output.append(
-                f"{match.name:<30} score: {match.score:.4f}  "
-                f"method: {match.method.value}  type: {match.license_type}"
+                f"[cyan]{match.name:<30}[/cyan] score: [{score_color}]{match.score:.4f}[/{score_color}]  "
+                f"method: [magenta]{match.method.value}[/magenta]  type: [blue]{match.license_type}[/blue]"
             )
     else:
-        output.append("No matches found.")
+        output.append("[italic yellow]No matches found.[/italic yellow]")
 
     return "\n".join(output)
 
@@ -75,7 +100,7 @@ def format_csv_output(results: dict) -> str:
                 f'"{file_path}","{match.name}",{match.score},'
                 f'{match.method.value},{match.license_type}'
             )
-    
+
     return "\n".join(lines)
 
 
@@ -154,9 +179,9 @@ Examples:
 
     args = parser.parse_args()
 
-    # Set up logging
-    level = logging.INFO if args.verbose else logging.WARNING
-    logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Set logging level for the RichHandler
+    logging.getLogger().setLevel(logging.INFO if args.verbose else logging.WARNING)
+
 
     try:
         # Initialize the updater first
@@ -167,105 +192,121 @@ Examples:
         )
 
         update_performed = False
-        if args.update:
-            logging.info("Forcing SPDX license database update...")
-            update_performed = updater.check_for_updates(force=True)
-            if update_performed:
-                print("SPDX license database updated successfully.")
-            else:
-                print("SPDX license database is already up-to-date or update failed. Check logs for details.")
+        update_message = ""
 
-            # If only update was requested and no files for analysis, exit
-            if not args.files:
-                sys.exit(0)
-        else:
-            # Perform daily update check if not forced and not only updating
-            # This happens implicitly for interactive CLI runs
-            if updater.check_for_updates(force=False):
-                print("Note: SPDX license database was updated in the background.")
-                update_performed = True
+        # --- Handle update check with Rich Progress ---
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            "  {task.percentage:>3.0f}%", # Adjusted percentage column
+            TimeElapsedColumn(),
+            TransferSpeedColumn(), # For download speed
+            console=console,
+            transient=True # Hide progress bar when done
+        ) as progress:
+            # Define a callback for updater to report progress
+            updater_task_id = progress.add_task("[cyan]Checking for license updates...", total=None)
+
+            def updater_progress_callback(current, total, status_msg):
+                if total: # If total is known (e.g., file size or count)
+                    progress.update(updater_task_id, total=total, completed=current, description=f"[cyan]{status_msg}")
+                else: # For indeterminate progress (e.g., initial fetch)
+                    # If total is 0 or 1, it's likely a phase change not a continuous download
+                    if progress.tasks[updater_task_id].total is None or progress.tasks[updater_task_id].total <= 1:
+                        progress.update(updater_task_id, total=1, completed=0, description=f"[cyan]{status_msg}")
+                    progress.update(updater_task_id, advance=0.1) # Simulate progress for spinner
+                    # Re-enable BarColumn and TaskProgressColumn if you want them for this phase
+                    # For simple status, it's better to just update description and let spinner run.
 
 
-        # If there are no files to analyze, and no update was performed explicitly,
-        # and no update happened implicitly, perhaps the user just ran `license-analyzer`
-        # without args, and it's already up-to-date. In this case, we might want to exit
-        # or give a hint.
-        if not args.files and not update_performed:
-            print("No license files provided for analysis. Use --help for usage.")
-            sys.exit(0)
-        elif not args.files and update_performed:
-            # Only update was performed, already handled above
-            pass
-        elif args.files:
-            # Proceed with analysis
-            analyzer = LicenseAnalyzer(
-                spdx_dir=args.spdx_dir, # Use the potentially custom or default SPDX dir
-                cache_dir=args.cache_dir, # Use the potentially custom or default DB cache dir
-                embedding_model_name=args.embedding_model
+            # Perform the update check
+            update_performed, update_message = updater.check_for_updates(
+                force=args.update,
+                progress_callback=updater_progress_callback
             )
+            progress.stop_task(updater_task_id) # Stop the spinner/progress for updater
 
-            # Analyze files
-            if len(args.files) == 1:
-                file_path = args.files[0]
-                matches = analyzer.analyze_file(file_path, args.top_n)
 
-                # Filter by minimum score
-                matches = [m for m in matches if m.score >= args.min_score]
+        if update_message:
+            console.print(Padding(f"[bold]{update_message}[/bold]", (1, 0, 1, 0))) # Add some padding
 
-                results = {file_path: matches}
-            else:
-                results = analyzer.analyze_multiple_files(args.files, args.top_n)
+        if not args.files and update_performed:
+            # If only update was performed and no files for analysis, exit
+            sys.exit(0)
+        elif not args.files and not update_performed:
+            # If no files to analyze, and no update was performed explicitly or implicitly,
+            console.print("[yellow]No license files provided for analysis. Use --help for usage.[/yellow]")
+            sys.exit(0)
 
-                # Filter by minimum score
-                for file_path in results:
-                    results[file_path] = [m for m in results[file_path] if m.score >= args.min_score]
 
-            # Format and output results
+        # --- Initialize Analyzer and build database with Rich Status/Progress ---
+        analyzer = None # Initialize to None
+
+        # Determine total files for progress bar during DB build
+        # This requires reading the directories first, potentially duplicating globbing.
+        # For simplicity, we'll use a spinner for DB build.
+        # If fine-grained progress is strictly required, LicenseDatabase needs to return total files
+        # before processing starts.
+
+        with Status("[green]Initializing license database...", spinner="dots", console=console) as db_status:
+            # Callback for LicenseAnalyzer's database update (for text updates on spinner)
+            def db_progress_callback(current, total, status_msg):
+                # Update the status text. For this spinner, total/current aren't used for a bar,
+                # but could be used to display text like "Processed X of Y files".
+                if total and total > 0:
+                     db_status.update(f"[green]Building cache: {status_msg} ({current}/{total})[/green]")
+                else:
+                    db_status.update(f"[green]Building cache: {status_msg}[/green]")
+
+            analyzer = LicenseAnalyzer(
+                spdx_dir=args.spdx_dir,
+                cache_dir=args.cache_dir,
+                embedding_model_name=args.embedding_model,
+                db_progress_callback=db_progress_callback # Pass the callback
+            )
+        console.print("[green]License database initialized.[/green]")
+
+
+        # --- Analyze files with Rich Status ---
+        if args.files:
+            with Status("[cyan]Analyzing license file(s)...[/cyan]", spinner="moon", console=console) as analysis_status:
+                if len(args.files) == 1:
+                    file_path = args.files[0]
+                    analysis_status.update(f"[cyan]Analyzing [bold]{file_path.name}[/bold]...[/cyan]")
+                    matches = analyzer.analyze_file(file_path, args.top_n)
+
+                    # Filter by minimum score
+                    matches = [m for m in matches if m.score >= args.min_score]
+                    results = {file_path: matches}
+                else:
+                    analysis_status.update(f"[cyan]Analyzing {len(args.files)} license files...[/cyan]")
+                    results = analyzer.analyze_multiple_files(args.files, args.top_n)
+
+                    # Filter by minimum score
+                    for file_path in results:
+                        results[file_path] = [m for m in results[file_path] if m.score >= args.min_score]
+            # Analysis done, print results
+            console.print("\n") # Add a newline after spinner for cleaner output
             if args.format == "json":
-                print(format_json_output(results))
+                console.print(format_json_output(results))
             elif args.format == "csv":
-                print(format_csv_output(results))
+                console.print(format_csv_output(results))
             else:  # text format
                 for file_path, matches in results.items():
                     if len(results) > 1:
-                        print()  # Add separator for multiple files
-                    print(format_text_output(file_path, matches))
+                        console.print(Padding(f"[bold grey]--- {file_path} ---[/bold grey]", (1, 0, 0, 0)))
+                    console.print(format_text_output(file_path, matches))
 
             # Show database stats if verbose
             if args.verbose:
                 stats = analyzer.get_database_stats()
-                print(f"\nDatabase stats: {stats['licenses']} licenses, "
-                      f"{stats['exceptions']} exceptions ({stats['total']} total)",
-                      file=sys.stderr)
+                console.print(
+                    f"\n[bold magenta]Database stats:[/bold magenta] [blue]{stats['licenses']}[/blue] licenses, "
+                    f"[blue]{stats['exceptions']}[/blue] exceptions ([blue]{stats['total']}[/blue] total)",
+                    file=sys.stderr # Still print to stderr as per original
+                )
 
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        console.print(f"[bold red]Error:[/bold red] {e}", file=sys.stderr)
         sys.exit(1)
-
-
-# Example usage as a library:
-"""
-from license_analyzer.core import LicenseAnalyzer, analyze_license_file
-
-# Method 1: Using the class directly
-analyzer = LicenseAnalyzer() # Will use default cached SPDX data
-
-# Analyze a single file
-matches = analyzer.analyze_file("LICENSE.txt", top_n=10)
-for match in matches:
-    print(f"{match.name}: {match.score:.4f} ({match.method.value})")
-
-# Analyze multiple files
-results = analyzer.analyze_multiple_files(["LICENSE1.txt", "LICENSE2.txt"])
-for file_path, matches in results.items():
-    print(f"\n{file_path}:")
-    for match in matches:
-        print(f"  {match.name}: {match.score:.4f}")
-
-# Analyze text directly
-license_text = "MIT License\n\nCopyright (c) 2024..."
-matches = analyzer.analyze_text(license_text)
-
-# Method 2: Using convenience functions
-matches = analyze_license_file("LICENSE.txt")
-"""

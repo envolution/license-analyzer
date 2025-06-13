@@ -11,11 +11,11 @@ import hashlib
 import logging
 from pathlib import Path
 from datetime import datetime, UTC
-from typing import Dict, List, Tuple, Optional, Union, Set
+from typing import Dict, List, Tuple, Optional, Union, Set, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import numpy as np
-from appdirs import user_cache_dir # NEW import
+from appdirs import user_cache_dir
 
 
 class MatchMethod(Enum):
@@ -124,19 +124,32 @@ class LicenseDatabase:
             self.logger.error(f"Failed to save database {db_path}: {e}")
             raise
 
-    def _update_database(self, source_dir: Path, db_path: Path, db_type: str) -> Dict[str, DatabaseEntry]:
-        """Update database from source directory."""
+    def _update_database(self, source_dir: Path, db_path: Path, db_type: str,
+                         progress_callback: Optional[Callable[[int, int, str], None]] = None) -> Dict[str, DatabaseEntry]:
+        """
+        Update database from source directory.
+        progress_callback: A function (current_count, total_count, status_message) for UI updates.
+        """
         if not source_dir.exists():
             self.logger.warning(f"Source directory does not exist: {source_dir}")
+            if progress_callback: # Update progress to indicate no source
+                progress_callback(0, 0, "Source directory missing.")
             return {}
 
         raw_db = self._load_existing_db(db_path)
         db = {}
         updated = False
 
-        for file_path in sorted(source_dir.glob("*.txt")):
+        license_files = sorted(source_dir.glob("*.txt"))
+        total_files = len(license_files)
+        processed_count = 0
+
+        for file_path in license_files:
             name = file_path.name
             current_sha = self._sha256sum(file_path)
+
+            if progress_callback:
+                progress_callback(processed_count, total_files, f"Processing {db_type}: [bold blue]{name}[/bold blue]")
 
             # Check if file needs updating
             if name in raw_db and raw_db[name].get("sha256") == current_sha:
@@ -150,41 +163,44 @@ class LicenseDatabase:
                     updated=entry_data["updated"],
                     file_path=file_path
                 )
-                continue
+            else:
+                # File is new or changed
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        text = f.read()
 
-            # File is new or changed
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    text = f.read()
+                    fingerprint = self._canonical_fingerprint(text)
 
-                fingerprint = self._canonical_fingerprint(text)
+                    db[name] = DatabaseEntry(
+                        name=name,
+                        sha256=current_sha,
+                        fingerprint=fingerprint,
+                        embedding=None,  # Will be computed on demand
+                        file_path=file_path
+                    )
 
-                db[name] = DatabaseEntry(
-                    name=name,
-                    sha256=current_sha,
-                    fingerprint=fingerprint,
-                    embedding=None,  # Will be computed on demand
-                    file_path=file_path
-                )
+                    # Update raw database
+                    raw_db[name] = {
+                        "sha256": current_sha,
+                        "fingerprint": fingerprint,
+                        "embedding": None,  # Placeholder, computed on demand
+                        "updated": datetime.now(UTC).isoformat()
+                    }
 
-                # Update raw database
-                raw_db[name] = {
-                    "sha256": current_sha,
-                    "fingerprint": fingerprint,
-                    "embedding": None,  # Placeholder, computed on demand
-                    "updated": datetime.now(UTC).isoformat()
-                }
+                    updated = True
+                    self.logger.info(f"Updated {db_type}: {name}")
 
-                updated = True
-                self.logger.info(f"Updated {db_type}: {name}")
-
-            except IOError as e:
-                self.logger.error(f"Failed to read {file_path}: {e}")
-                continue
+                except IOError as e:
+                    self.logger.error(f"Failed to read {file_path}: {e}")
+                    # Skip this file but continue processing others
+            processed_count += 1
 
         if updated:
             self._save_db(raw_db, db_path)
             self.logger.info(f"Updated {db_type} database: {db_path}")
+
+        if progress_callback:
+            progress_callback(total_files, total_files, f"Finished {db_type} database update.")
 
         return db
 
@@ -231,7 +247,10 @@ class LicenseDatabase:
     @property
     def licenses_db(self) -> Dict[str, DatabaseEntry]:
         """Get licenses database, updating if necessary."""
+        # This property is now effectively bypassed during initial LicenseAnalyzer.__init__
+        # but kept for potential direct usage if needed elsewhere.
         if self._licenses_db is None:
+            self.logger.warning("LicenseDatabase.licenses_db accessed before explicit initialization in Analyzer.")
             self._licenses_db = self._update_database(
                 self.spdx_dir, self.licenses_db_path, "licenses"
             )
@@ -240,7 +259,9 @@ class LicenseDatabase:
     @property
     def exceptions_db(self) -> Dict[str, DatabaseEntry]:
         """Get exceptions database, updating if necessary."""
+        # Similar to licenses_db, this is bypassed by Analyzer's explicit init
         if self._exceptions_db is None:
+            self.logger.warning("LicenseDatabase.exceptions_db accessed before explicit initialization in Analyzer.")
             self._exceptions_db = self._update_database(
                 self.exceptions_dir, self.exceptions_db_path, "exceptions"
             )
@@ -262,17 +283,19 @@ class LicenseDatabase:
 class LicenseAnalyzer:
     """Main license analyzer class."""
 
-    def __init__(self, spdx_dir: Optional[Union[str, Path]] = None, # spdx_dir now Optional
+    def __init__(self, spdx_dir: Optional[Union[str, Path]] = None,
                  cache_dir: Optional[Union[str, Path]] = None,
-                 embedding_model_name: str = "all-MiniLM-L6-v2"):
+                 embedding_model_name: str = "all-MiniLM-L6-v2",
+                 db_progress_callback: Optional[Callable[[int, int, str], None]] = None): # NEW callback
         """
         Initialize the license analyzer.
 
         Args:
             spdx_dir: Path to SPDX licenses directory. If None, it defaults to
                       the app's cache directory (e.g., ~/.cache/license-analyzer/spdx).
-            cache_dir: Path to cache directory (default: ~/.cache/license-analyzer/updater or ~/.cache/spdx).
+            cache_dir: Path to cache directory for analyzer database (default: ~/.cache/license-analyzer/db_cache).
             embedding_model_name: Name of the sentence transformer model
+            db_progress_callback: A function (current_count, total_count, status_message) for UI updates during DB update.
         """
         if cache_dir is None:
             # Main cache directory for the application
@@ -289,6 +312,20 @@ class LicenseAnalyzer:
 
         self.db = LicenseDatabase(spdx_dir, cache_dir, embedding_model_name)
         self.logger = logging.getLogger(__name__)
+
+        # Manually trigger database update with progress callback
+        # This bypasses the lazy loading of @property and allows progress reporting
+        # Check if DBs are already loaded (e.g., if analyzer is reused)
+        # Note: self.db._licenses_db will be None on first access
+        self.logger.info("Initializing licenses database...")
+        self.db._licenses_db = self.db._update_database(
+            self.db.spdx_dir, self.db.licenses_db_path, "licenses", db_progress_callback
+        )
+        self.logger.info("Initializing exceptions database...")
+        self.db._exceptions_db = self.db._update_database(
+            self.db.exceptions_dir, self.db.exceptions_db_path, "exceptions", db_progress_callback
+        )
+
 
     def analyze_file(self, file_path: Union[str, Path], top_n: int = 5) -> List[LicenseMatch]:
         """
@@ -351,22 +388,23 @@ class LicenseAnalyzer:
         # If we have perfect matches, return them but also check for other perfect matches
         if sha_matches or fingerprint_matches:
             perfect_matches = sha_matches + fingerprint_matches
-            if len(perfect_matches) >= top_n:
-                # Deduplicate perfect matches if a license matched by both SHA and fingerprint
-                # For now, a simple unique by name would be ok as score is same.
-                seen_names: Set[str] = set()
-                deduplicated_perfect_matches = []
-                for m in perfect_matches:
-                    if m.name not in seen_names:
-                        deduplicated_perfect_matches.append(m)
-                        seen_names.add(m.name)
-                # Sort unique perfect matches by method preference (SHA > Fingerprint)
-                deduplicated_perfect_matches.sort(key=lambda x: x.method == MatchMethod.SHA256, reverse=True)
+            # Deduplicate perfect matches if a license matched by both SHA and fingerprint
+            # For now, a simple unique by name would be ok as score is same.
+            seen_names: Set[str] = set()
+            deduplicated_perfect_matches = []
+            for m in perfect_matches:
+                if m.name not in seen_names:
+                    deduplicated_perfect_matches.append(m)
+                    seen_names.add(m.name)
+            # Sort unique perfect matches by method preference (SHA > Fingerprint)
+            deduplicated_perfect_matches.sort(key=lambda x: x.method == MatchMethod.SHA256, reverse=True)
+
+            if len(deduplicated_perfect_matches) >= top_n:
                 return deduplicated_perfect_matches[:top_n]
             # Continue to find more matches up to top_n
-            remaining = top_n - len(perfect_matches)
+            remaining = top_n - len(deduplicated_perfect_matches)
         else:
-            perfect_matches = []
+            deduplicated_perfect_matches = []
             remaining = top_n
 
         # Only compute embeddings if we need more matches
@@ -379,7 +417,7 @@ class LicenseAnalyzer:
                 for name, (entry, entry_type) in all_entries.items():
                     # Skip if already in perfect matches (only necessary if perfect_matches is passed into this loop)
                     # Currently, `all_entries` is fixed, so this check is valid.
-                    if any(match.name == name for match in perfect_matches):
+                    if any(match.name == name for match in deduplicated_perfect_matches):
                         continue
 
                     try:
@@ -400,17 +438,10 @@ class LicenseAnalyzer:
                 self.logger.warning("sentence-transformers not available, skipping embedding analysis")
 
         # Combine all matches
-        # Ensure perfect matches are deduplicated before combining and slicing.
-        seen_names: Set[str] = set()
-        final_perfect_matches = []
-        for m in perfect_matches:
-            if m.name not in seen_names:
-                final_perfect_matches.append(m)
-                seen_names.add(m.name)
-
-        all_matches = final_perfect_matches
+        all_matches = deduplicated_perfect_matches
 
         # Add embedding matches, avoiding duplicates already present in perfect_matches
+        seen_names: Set[str] = set(m.name for m in all_matches) # Re-init seen_names for clarity
         for m in embedding_matches:
             if m.name not in seen_names:
                 all_matches.append(m)
@@ -458,7 +489,7 @@ class LicenseAnalyzer:
 
 # Convenience functions for backward compatibility
 def analyze_license_file(file_path: Union[str, Path], top_n: int = 5,
-                        spdx_dir: Optional[Union[str, Path]] = None) -> List[LicenseMatch]: # spdx_dir now Optional
+                        spdx_dir: Optional[Union[str, Path]] = None) -> List[LicenseMatch]:
     """
     Convenience function to analyze a single license file.
 
@@ -470,12 +501,13 @@ def analyze_license_file(file_path: Union[str, Path], top_n: int = 5,
     Returns:
         List of LicenseMatch objects
     """
-    analyzer = LicenseAnalyzer(spdx_dir=spdx_dir) # Pass spdx_dir to constructor
+    # Note: Convenience functions do not expose progress callbacks directly
+    analyzer = LicenseAnalyzer(spdx_dir=spdx_dir)
     return analyzer.analyze_file(file_path, top_n)
 
 
 def analyze_license_text(text: str, top_n: int = 5,
-                        spdx_dir: Optional[Union[str, Path]] = None) -> List[LicenseMatch]: # spdx_dir now Optional
+                        spdx_dir: Optional[Union[str, Path]] = None) -> List[LicenseMatch]:
     """
     Convenience function to analyze license text.
 
@@ -487,5 +519,6 @@ def analyze_license_text(text: str, top_n: int = 5,
     Returns:
         List of LicenseMatch objects
     """
-    analyzer = LicenseAnalyzer(spdx_dir=spdx_dir) # Pass spdx_dir to constructor
+    # Note: Convenience functions do not expose progress callbacks directly
+    analyzer = LicenseAnalyzer(spdx_dir=spdx_dir)
     return analyzer.analyze_text(text, top_n)
