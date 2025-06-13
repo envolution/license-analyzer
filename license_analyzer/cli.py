@@ -306,7 +306,7 @@ Examples:
                 console=console,
             ) as analysis_status:
                 if len(args.files) == 1:
-                    file_path = args.files[0]
+                    file_path = Path(args.files[0])
                     analysis_status.update(
                         f"[cyan]Analyzing [bold]{file_path.name}[/bold]...[/cyan]"
                     )
@@ -349,9 +349,8 @@ Examples:
                 console.print(
                     f"\n[bold magenta]Database stats:[/bold magenta] [blue]{stats['licenses']}[/blue] licenses, "
                     f"[blue]{stats['exceptions']}[/blue] exceptions ([blue]{stats['total']}[/blue] total)",
-                    file=sys.stderr,  # Still print to stderr as per original
                 )
 
     except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] {e}", file=sys.stderr)
+        console.print(f"[bold red]Error:[/bold red] {e}")
         sys.exit(1)
