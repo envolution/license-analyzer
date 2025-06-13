@@ -6,33 +6,30 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "license-analyzer"
 version = "0.0.1"
-authors = [
-  { name="envolution", email="involution@gmail.com" },
-]
+authors = [{ name = "envolution", email = "involution@gmail.com" }]
 description = "A robust Python module for analyzing and comparing software licenses"
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Legal",
-    "Topic :: Utilities",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Utilities",
 ]
 dependencies = [
-    "numpy>=1.21.0",
-    "sentence-transformers>=2.0.0",
-    "torch>=1.9.0",
-    "transformers>=4.0.0",
+  "numpy>=1.21.0",
+  "sentence-transformers>=2.0.0",
+  "torch>=1.9.0",
+  "transformers>=4.0.0",
 ]
 
 [project.urls]
@@ -41,13 +38,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=6.0",
-    "pytest-cov>=2.0",
-    "black>=21.0",
-    "flake8>=3.8",
-    "mypy>=0.800",
-    "sphinx>=4.0",
-    "sphinx-rtd-theme>=1.0",
+  "pytest>=6.0",
+  "pytest-cov>=2.0",
+  "black>=21.0",
+  "flake8>=3.8",
+  "mypy>=0.800",
+  "sphinx>=4.0",
+  "sphinx-rtd-theme>=1.0",
 ]
 
 [project.scripts]
@@ -96,19 +93,19 @@ python_functions = ["test_*"]
 addopts = "--cov=license_analyzer --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]
-source = ["license_analyzer"] # Point to the package directory
+source = ["license_analyzer"]    # Point to the package directory
 omit = ["*/tests/*", "*/test_*"]
 
 [tool.coverage.report]
 exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-    "class .*\\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
+  "pragma: no cover",
+  "def __repr__",
+  "if self.debug:",
+  "if settings.DEBUG",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if 0:",
+  "if __name__ == .__main__.:",
+  "class .*\\bProtocol\\):",
+  "@(abc\\.)?abstractmethod",
 ]
