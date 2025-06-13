@@ -130,7 +130,7 @@ SOFTWARE."""
         text_sha = self.db._sha256sum_text("test content")
         self.assertEqual(sha, text_sha)
 
-    @patch("license_analyzer.SentenceTransformer")
+    @patch("license_analyzer.core.SentenceTransformer")
     def test_embedding_model_lazy_loading(self, mock_transformer):
         """Test that embedding model is loaded lazily."""
         mock_model = Mock()
@@ -179,7 +179,7 @@ class TestLicenseAnalyzer(unittest.TestCase):
         (self.spdx_dir / "MIT.txt").write_text(mit_content)
 
         # Mock the sentence transformer to avoid downloading models in tests
-        with patch("license_analyzer.SentenceTransformer") as mock_transformer:
+        with patch("license_analyzer.core.SentenceTransformer") as mock_transformer:
             mock_model = Mock()
             mock_model.encode.return_value = np.array([0.1, 0.2, 0.3])
             mock_transformer.return_value = mock_model
@@ -194,7 +194,7 @@ class TestLicenseAnalyzer(unittest.TestCase):
         self.assertIsInstance(self.analyzer.db, LicenseDatabase)
 
     @patch("license_analyzer.util")
-    @patch("license_analyzer.SentenceTransformer")
+    @patch("license_analyzer.core.SentenceTransformer")
     def test_analyze_text_exact_match(self, mock_transformer, mock_util):
         """Test analyzing text with exact SHA256 match."""
         # Setup mocks
@@ -224,7 +224,7 @@ class TestLicenseAnalyzer(unittest.TestCase):
         self.assertEqual(len(matches), 0)
 
     @patch("license_analyzer.util")
-    @patch("license_analyzer.SentenceTransformer")
+    @patch("license_analyzer.core.SentenceTransformer")
     def test_analyze_multiple_files(self, mock_transformer, mock_util):
         """Test analyzing multiple files."""
         mock_model = Mock()
@@ -363,7 +363,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
         (self.exceptions_dir / "TestException.txt").write_text("Test exception content")
 
     @patch("license_analyzer.util")
-    @patch("license_analyzer.SentenceTransformer")
+    @patch("license_analyzer.core.SentenceTransformer")
     def test_full_workflow(self, mock_transformer, mock_util):
         """Test complete workflow from initialization to analysis."""
         # Setup mocks
