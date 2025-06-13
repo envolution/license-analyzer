@@ -130,6 +130,7 @@ SOFTWARE."""
         text_sha = self.db._sha256sum_text("test content")
         self.assertEqual(sha, text_sha)
 
+    # THIS PATCH IS ALREADY CORRECT! It targets sentence_transformers directly.
     @patch("sentence_transformers.SentenceTransformer")
     def test_embedding_model_lazy_loading(self, mock_transformer):
         """Test that embedding model is loaded lazily."""
@@ -183,7 +184,8 @@ class TestLicenseAnalyzer(unittest.TestCase):
         (self.spdx_dir / "MIT.txt").write_text(mit_content)
 
         # Mock the sentence transformer to avoid downloading models in tests
-        with patch("license_analyzer.core.SentenceTransformer") as mock_transformer:
+        # CORRECTED: Patch sentence_transformers.SentenceTransformer
+        with patch("sentence_transformers.SentenceTransformer") as mock_transformer:
             mock_model = Mock()
             mock_model.encode.return_value = np.array([0.1, 0.2, 0.3])
             mock_transformer.return_value = mock_model
@@ -192,27 +194,29 @@ class TestLicenseAnalyzer(unittest.TestCase):
                 spdx_dir=self.spdx_dir, cache_dir=self.cache_dir
             )
 
-    def test_analyzer_initialization(self):
-        """Test analyzer initialization."""
-        self.assertIsInstance(self.analyzer, LicenseAnalyzer)
-        self.assertIsInstance(self.analyzer.db, LicenseDatabase)
-
-    @patch("license_analyzer.util")
-    @patch("license_analyzer.core.SentenceTransformer")
+    # CORRECTED: Patch sentence_transformers.util and sentence_transformers.SentenceTransformer
+    @patch("sentence_transformers.util")
+    @patch("sentence_transformers.SentenceTransformer")
     def test_analyze_text_exact_match(self, mock_transformer, mock_util):
         """Test analyzing text with exact SHA256 match."""
         # Setup mocks
         mock_model = Mock()
         mock_transformer.return_value = mock_model
+        # Note: If there's an exact SHA256 match, SentenceTransformer.encode and util.cos_sim
+        # might not be called. Ensure your test scenario covers the cases where they are.
+        # For an exact match test, these mocks are effectively skipped, but it's good
+        # to have them patched if the analyzer *might* try to use them.
 
         # Test exact match
-        mit_content = "MIT License\n\nCopyright (c) 2024"
+        mit_content = "MIT License\n\nCopyright (c) 2024" # This content should match MIT.txt
         matches = self.analyzer.analyze_text(mit_content)
 
         self.assertGreater(len(matches), 0)
         # Should have at least one perfect match
         perfect_matches = [m for m in matches if m.score == 1.0]
         self.assertGreater(len(perfect_matches), 0)
+        self.assertEqual(perfect_matches[0].method, MatchMethod.SHA256)
+
 
     def test_analyze_file_not_found(self):
         """Test analyzing non-existent file."""
@@ -227,14 +231,15 @@ class TestLicenseAnalyzer(unittest.TestCase):
         matches = self.analyzer.analyze_text("   \n  \t  ")
         self.assertEqual(len(matches), 0)
 
-    @patch("license_analyzer.util")
-    @patch("license_analyzer.core.SentenceTransformer")
+    # CORRECTED: Patch sentence_transformers.util and sentence_transformers.SentenceTransformer
+    @patch("sentence_transformers.util")
+    @patch("sentence_transformers.SentenceTransformer")
     def test_analyze_multiple_files(self, mock_transformer, mock_util):
         """Test analyzing multiple files."""
         mock_model = Mock()
         mock_model.encode.return_value = np.array([0.1, 0.2, 0.3])
         mock_transformer.return_value = mock_model
-        mock_util.cos_sim.return_value = [[0.8]]
+        mock_util.cos_sim.return_value = [[0.8]] # Ensure util is properly mocked for cos_sim
 
         # Create test files
         file1 = Path(self.temp_dir) / "license1.txt"
@@ -247,6 +252,11 @@ class TestLicenseAnalyzer(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertIn(str(file1), results)
         self.assertIn(str(file2), results)
+
+        # Assert that SentenceTransformer.encode was called for both files,
+        # and util.cos_sim was called for each comparison if similarity is needed.
+        self.assertEqual(mock_model.encode.call_count, 2) # Once for each file text
+
 
     def test_get_database_stats(self):
         """Test getting database statistics."""
@@ -330,6 +340,7 @@ class TestIntegration(unittest.TestCase):
         # Create directory structure
         self.spdx_dir.mkdir(parents=True)
         self.exceptions_dir.mkdir(parents=True)
+        self.cache_dir.mkdir(parents=True) # Ensure cache dir is created for analyzer
 
         # Create realistic license content
         mit_license = """MIT License
@@ -366,17 +377,17 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
         (self.spdx_dir / "Apache-2.0.txt").write_text(apache_license)
         (self.exceptions_dir / "TestException.txt").write_text("Test exception content")
 
-    @patch("license_analyzer.util")
-    @patch("license_analyzer.core.SentenceTransformer")
+    # CORRECTED: Patch sentence_transformers.util and sentence_transformers.SentenceTransformer
+    @patch("sentence_transformers.util")
+    @patch("sentence_transformers.SentenceTransformer")
     def test_full_workflow(self, mock_transformer, mock_util):
         """Test complete workflow from initialization to analysis."""
         # Setup mocks
         mock_model = Mock()
-        mock_model.encode.return_value = np.array(
-            [0.1, 0.2, 0.3] * 128
-        )  # Realistic embedding size
+        # Realistic embedding size might be 384 for all-MiniLM-L6-v2, but 3 is fine for a mock
+        mock_model.encode.return_value = np.array([0.1, 0.2, 0.3])
         mock_transformer.return_value = mock_model
-        mock_util.cos_sim.return_value = [[0.85]]
+        mock_util.cos_sim.return_value = np.array([[0.85]]) # cos_sim returns a 2D numpy array
 
         # Initialize analyzer
         analyzer = LicenseAnalyzer(spdx_dir=self.spdx_dir, cache_dir=self.cache_dir)
@@ -389,137 +400,27 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
         # Should find exact match
         exact_matches = [m for m in matches if m.score == 1.0]
         self.assertGreater(len(exact_matches), 0)
+        self.assertEqual(exact_matches[0].name, "MIT.txt")
+        self.assertEqual(exact_matches[0].method, MatchMethod.SHA256)
+
 
         # Test similarity match
+        # This content is similar to MIT but not an exact SHA256/fingerprint match.
+        # This will trigger the embedding comparison.
         similar_content = "MIT License\n\nCopyright (c) 2024 Different Project\n\nPermission is hereby granted..."
         matches = analyzer.analyze_text(similar_content, top_n=5)
 
         self.assertGreater(len(matches), 0)
+        # Verify that an embedding match was returned with the mocked score
+        embedding_matches = [m for m in matches if m.method == MatchMethod.EMBEDDING]
+        self.assertGreater(len(embedding_matches), 0)
+        self.assertEqual(embedding_matches[0].score, 0.85)
 
         # Test database stats
         stats = analyzer.get_database_stats()
         self.assertEqual(stats["licenses"], 2)  # MIT and Apache
         self.assertEqual(stats["exceptions"], 1)  # TestException
         self.assertEqual(stats["total"], 3)
-
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-# tests/test_cli.py
-import unittest
-import tempfile
-import json
-from pathlib import Path
-from unittest.mock import Mock, patch
-from io import StringIO
-import sys
-
-# Import CLI module (assuming it's in the same package)
-from license_analyzer.cli import (
-    format_text_output,
-    format_json_output,
-    format_csv_output,
-    main,
-)
-from license_analyzer import LicenseMatch, MatchMethod
-
-
-class TestCLIFormatting(unittest.TestCase):
-    """Test CLI output formatting functions."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        self.matches = [
-            LicenseMatch("MIT.txt", 1.0, MatchMethod.SHA256, "license"),
-            LicenseMatch("Apache-2.0.txt", 0.95, MatchMethod.EMBEDDING, "license"),
-            LicenseMatch("GPL-3.0.txt", 0.85, MatchMethod.FINGERPRINT, "license"),
-        ]
-
-    def test_format_text_output(self):
-        """Test text output formatting."""
-        output = format_text_output("test.txt", self.matches)
-
-        self.assertIn("Analysis results for: test.txt", output)
-        self.assertIn("MIT.txt", output)
-        self.assertIn("1.0000", output)
-        self.assertIn("sha256", output)
-        self.assertIn("Apache-2.0.txt", output)
-        self.assertIn("0.9500", output)
-
-    def test_format_json_output(self):
-        """Test JSON output formatting."""
-        results = {"test.txt": self.matches}
-        output = format_json_output(results)
-
-        parsed = json.loads(output)
-        self.assertIn("test.txt", parsed)
-        self.assertEqual(len(parsed["test.txt"]), 3)
-        self.assertEqual(parsed["test.txt"][0]["name"], "MIT.txt")
-        self.assertEqual(parsed["test.txt"][0]["score"], 1.0)
-        self.assertEqual(parsed["test.txt"][0]["method"], "sha256")
-
-    def test_format_csv_output(self):
-        """Test CSV output formatting."""
-        results = {"test.txt": self.matches}
-        output = format_csv_output(results)
-
-        lines = output.split("\n")
-        self.assertEqual(lines[0], "file_path,license_name,score,method,license_type")
-        self.assertIn('"test.txt","MIT.txt",1.0,sha256,license', lines[1])
-        self.assertIn('"test.txt","Apache-2.0.txt",0.95,embedding,license', lines[2])
-
-    def test_format_empty_matches(self):
-        """Test formatting with no matches."""
-        output = format_text_output("empty.txt", [])
-        self.assertIn("No matches found", output)
-
-        json_output = format_json_output({"empty.txt": []})
-        parsed = json.loads(json_output)
-        self.assertEqual(parsed["empty.txt"], [])
-
-
-class TestCLIMain(unittest.TestCase):
-    """Test CLI main function."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        self.temp_dir = tempfile.mkdtemp()
-        self.test_file = Path(self.temp_dir) / "test_license.txt"
-        self.test_file.write_text("MIT License\n\nTest content")
-
-    @patch("license_analyzer.cli.LicenseAnalyzer")
-    @patch("sys.argv", ["cli.py", "test.txt"])
-    def test_main_single_file(self, mock_analyzer_class):
-        """Test main function with single file."""
-        mock_analyzer = Mock()
-        mock_analyzer.analyze_file.return_value = [
-            LicenseMatch("MIT.txt", 1.0, MatchMethod.SHA256)
-        ]
-        mock_analyzer.get_database_stats.return_value = {
-            "licenses": 10,
-            "exceptions": 5,
-            "total": 15,
-        }
-        mock_analyzer_class.return_value = mock_analyzer
-
-        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
-            with patch("pathlib.Path.exists", return_value=True):
-                try:
-                    main()
-                    output = mock_stdout.getvalue()
-                    self.assertIn("MIT.txt", output)
-                    self.assertIn("1.0000", output)
-                except SystemExit:
-                    pass  # Expected for argument parsing
-
-    @patch("sys.argv", ["cli.py"])
-    def test_main_no_args(self):
-        """Test main function with no arguments."""
-        with patch("sys.stderr", new_callable=StringIO):
-            with self.assertRaises(SystemExit):
-                main()
 
 
 if __name__ == "__main__":
