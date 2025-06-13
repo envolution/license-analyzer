@@ -15,6 +15,7 @@ from typing import Dict, List, Tuple, Optional, Union, Set
 from dataclasses import dataclass, field
 from enum import Enum
 import numpy as np
+from appdirs import user_cache_dir # NEW import
 
 
 class MatchMethod(Enum):
@@ -55,7 +56,7 @@ class LicenseDatabase:
     def __init__(self, spdx_dir: Path, cache_dir: Path, embedding_model_name: str = "all-MiniLM-L6-v2"):
         self.spdx_dir = Path(spdx_dir)
         self.exceptions_dir = self.spdx_dir / "exceptions"
-        self.cache_dir = Path(cache_dir)
+        self.cache_dir = Path(cache_dir) # This is for internal database JSONs
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.embedding_model_name = embedding_model_name
@@ -261,19 +262,30 @@ class LicenseDatabase:
 class LicenseAnalyzer:
     """Main license analyzer class."""
 
-    def __init__(self, spdx_dir: Union[str, Path] = "/usr/share/licenses/spdx",
+    def __init__(self, spdx_dir: Optional[Union[str, Path]] = None, # spdx_dir now Optional
                  cache_dir: Optional[Union[str, Path]] = None,
                  embedding_model_name: str = "all-MiniLM-L6-v2"):
         """
         Initialize the license analyzer.
 
         Args:
-            spdx_dir: Path to SPDX licenses directory
-            cache_dir: Path to cache directory (default: ~/.cache/spdx)
+            spdx_dir: Path to SPDX licenses directory. If None, it defaults to
+                      the app's cache directory (e.g., ~/.cache/license-analyzer/spdx).
+            cache_dir: Path to cache directory (default: ~/.cache/license-analyzer/updater or ~/.cache/spdx).
             embedding_model_name: Name of the sentence transformer model
         """
         if cache_dir is None:
-            cache_dir = Path.home() / ".cache" / "spdx"
+            # Main cache directory for the application
+            cache_dir = Path(user_cache_dir(appname="license-analyzer", appauthor="envolution")) / "db_cache"
+        else:
+            cache_dir = Path(cache_dir)
+
+        if spdx_dir is None:
+            # Default SPDX data directory is now within the main cache dir
+            spdx_dir = Path(user_cache_dir(appname="license-analyzer", appauthor="envolution")) / "spdx"
+        else:
+            spdx_dir = Path(spdx_dir)
+
 
         self.db = LicenseDatabase(spdx_dir, cache_dir, embedding_model_name)
         self.logger = logging.getLogger(__name__)
@@ -340,7 +352,17 @@ class LicenseAnalyzer:
         if sha_matches or fingerprint_matches:
             perfect_matches = sha_matches + fingerprint_matches
             if len(perfect_matches) >= top_n:
-                return perfect_matches[:top_n]
+                # Deduplicate perfect matches if a license matched by both SHA and fingerprint
+                # For now, a simple unique by name would be ok as score is same.
+                seen_names: Set[str] = set()
+                deduplicated_perfect_matches = []
+                for m in perfect_matches:
+                    if m.name not in seen_names:
+                        deduplicated_perfect_matches.append(m)
+                        seen_names.add(m.name)
+                # Sort unique perfect matches by method preference (SHA > Fingerprint)
+                deduplicated_perfect_matches.sort(key=lambda x: x.method == MatchMethod.SHA256, reverse=True)
+                return deduplicated_perfect_matches[:top_n]
             # Continue to find more matches up to top_n
             remaining = top_n - len(perfect_matches)
         else:
@@ -355,7 +377,8 @@ class LicenseAnalyzer:
                 text_embedding = self.db.embedding_model.encode(text)
 
                 for name, (entry, entry_type) in all_entries.items():
-                    # Skip if already in perfect matches
+                    # Skip if already in perfect matches (only necessary if perfect_matches is passed into this loop)
+                    # Currently, `all_entries` is fixed, so this check is valid.
                     if any(match.name == name for match in perfect_matches):
                         continue
 
@@ -377,7 +400,21 @@ class LicenseAnalyzer:
                 self.logger.warning("sentence-transformers not available, skipping embedding analysis")
 
         # Combine all matches
-        all_matches = perfect_matches + embedding_matches[:remaining]
+        # Ensure perfect matches are deduplicated before combining and slicing.
+        seen_names: Set[str] = set()
+        final_perfect_matches = []
+        for m in perfect_matches:
+            if m.name not in seen_names:
+                final_perfect_matches.append(m)
+                seen_names.add(m.name)
+
+        all_matches = final_perfect_matches
+
+        # Add embedding matches, avoiding duplicates already present in perfect_matches
+        for m in embedding_matches:
+            if m.name not in seen_names:
+                all_matches.append(m)
+                seen_names.add(m.name)
 
         # Sort by score (perfect matches first, then by similarity)
         # Prioritize SHA256 > FINGERPRINT > EMBEDDING for ties, and then by score
@@ -419,9 +456,9 @@ class LicenseAnalyzer:
         }
 
 
-# Convenience functions for backward compatibility or simpler usage
+# Convenience functions for backward compatibility
 def analyze_license_file(file_path: Union[str, Path], top_n: int = 5,
-                        spdx_dir: Union[str, Path] = "/usr/share/licenses/spdx") -> List[LicenseMatch]:
+                        spdx_dir: Optional[Union[str, Path]] = None) -> List[LicenseMatch]: # spdx_dir now Optional
     """
     Convenience function to analyze a single license file.
 
@@ -433,12 +470,12 @@ def analyze_license_file(file_path: Union[str, Path], top_n: int = 5,
     Returns:
         List of LicenseMatch objects
     """
-    analyzer = LicenseAnalyzer(spdx_dir=spdx_dir)
+    analyzer = LicenseAnalyzer(spdx_dir=spdx_dir) # Pass spdx_dir to constructor
     return analyzer.analyze_file(file_path, top_n)
 
 
 def analyze_license_text(text: str, top_n: int = 5,
-                        spdx_dir: Union[str, Path] = "/usr/share/licenses/spdx") -> List[LicenseMatch]:
+                        spdx_dir: Optional[Union[str, Path]] = None) -> List[LicenseMatch]: # spdx_dir now Optional
     """
     Convenience function to analyze license text.
 
@@ -450,5 +487,5 @@ def analyze_license_text(text: str, top_n: int = 5,
     Returns:
         List of LicenseMatch objects
     """
-    analyzer = LicenseAnalyzer(spdx_dir=spdx_dir)
+    analyzer = LicenseAnalyzer(spdx_dir=spdx_dir) # Pass spdx_dir to constructor
     return analyzer.analyze_text(text, top_n)
