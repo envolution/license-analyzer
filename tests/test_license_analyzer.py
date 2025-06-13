@@ -195,7 +195,6 @@ class TestLicenseAnalyzer(unittest.TestCase):
             )
 
     # CORRECTED: Patch sentence_transformers.util and sentence_transformers.SentenceTransformer
-    @patch("license_analyzer.core.LicenseDatabase._get_embedding")
     @patch("sentence_transformers.util")
     @patch("sentence_transformers.SentenceTransformer")
     def test_analyze_text_exact_match(self, mock_transformer, mock_util):
@@ -234,6 +233,7 @@ class TestLicenseAnalyzer(unittest.TestCase):
         self.assertEqual(len(matches), 0)
 
     # CORRECTED: Patch sentence_transformers.util and sentence_transformers.SentenceTransformer
+    @patch("license_analyzer.core.LicenseDatabase._get_embedding")
     @patch("sentence_transformers.util")
     @patch("sentence_transformers.SentenceTransformer")
     def test_analyze_multiple_files(
