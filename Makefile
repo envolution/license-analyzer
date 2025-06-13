@@ -1,3 +1,4 @@
+# Makefile
 .PHONY: help install install-dev test test-cov lint format clean build upload
 
 help:
@@ -16,8 +17,8 @@ install:
 	pip install -e .
 
 install-dev:
+	# All development dependencies are now handled by pyproject.toml's [project.optional-dependencies.dev]
 	pip install -e .[dev]
-	pip install -r requirements-dev.txt
 
 test:
 	pytest
