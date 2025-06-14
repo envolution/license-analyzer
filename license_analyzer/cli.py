@@ -315,7 +315,7 @@ Examples:
                 # Using Live for Status to ensure it cleans up correctly even on errors
                 with Status(
                     f"[cyan]Analyzing [bold]{file_path.name}[/bold]...",
-                    spinner="moon",
+                    spinner="dots",
                     console=console,
                 ) as status_message:
                     # Define a dummy per_entry_embed_callback to update the Status message
