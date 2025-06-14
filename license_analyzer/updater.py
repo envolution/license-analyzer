@@ -323,7 +323,7 @@ class LicenseUpdater:
                 f"License data version '{last_version}' is up-to-date with latest '{latest_tag}'. Marked as checked today."
             )
             self._set_last_checked_info(last_version, today_str)
-            return False, f"License data is already up-to-date (v{last_version})."
+            return False, f"License data is already up-to-date ({last_version})."
         else:  # latest_version_parsed <= last_version_parsed and checked today
             logger.info(
                 f"License data version '{last_version}' already checked today and is up-to-date with latest '{latest_tag}'."
