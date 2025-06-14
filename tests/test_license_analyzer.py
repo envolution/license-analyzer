@@ -201,15 +201,25 @@ SOFTWARE."""
         mock_model.encode.return_value = np.array([0.5, 0.6, 0.7], dtype=np.float32) 
         mock_transformer.return_value = mock_model
 
-        # Pre-populate the _licenses_db as it would be after _update_database
+        # --- FIX: Manually create the licenses.json file as it would be after initial _update_database ---
+        initial_db_content = {
+            "MIT": {
+                "sha256": self.db._sha256sum_text(self.mit_content),
+                "fingerprint": self.db._canonical_fingerprint(self.mit_content),
+                "embedding": None,
+                "updated": datetime.now(UTC).isoformat()
+            }
+        }
+        with open(self.licenses_db_path, "w", encoding="utf-8") as f:
+            json.dump(initial_db_content, f, indent=2, ensure_ascii=False)
+        # --- END FIX ---
+
+        # Pre-populate the _licenses_db in memory (optional, but good practice for clarity)
+        # Load from the file we just created, as _load_existing_db would do
+        raw_db_from_file = self.db._load_existing_db(self.licenses_db_path)
         self.db._licenses_db = {
-            "MIT": DatabaseEntry(
-                name="MIT",
-                sha256="dummy_sha",
-                fingerprint="dummy_fp",
-                embedding=None, # Crucially, embedding is None
-                file_path=self.spdx_dir / "MIT",
-            )
+            name: DatabaseEntry(name=name, file_path=self.spdx_dir / name, **data)
+            for name, data in raw_db_from_file.items()
         }
 
         mit_entry = self.db._licenses_db["MIT"]
@@ -226,7 +236,7 @@ SOFTWARE."""
         # Verify SentenceTransformer.encode was called
         mock_model.encode.assert_called_once_with(self.mit_content)
 
-        # Verify _save_db was called to persist the embedding
+        # Verify _save_db was called to persist the embedding (THIS ASSERTION NOW PASSES)
         mock_save_db.assert_called_once()
         saved_db_data = mock_save_db.call_args[0][0]
         self.assertIn("MIT", saved_db_data)
@@ -536,15 +546,13 @@ class TestConvenienceFunctions(unittest.TestCase):
         test_file.write_text("test content")
 
         # The `spdx_dir` argument to `analyze_license_file` maps directly to `LicenseAnalyzer`'s `spdx_dir`.
-        # Other arguments are NOT passed by the convenience function, so `LicenseAnalyzer` uses its own internal defaults.
+        # Other arguments are NOT passed by the convenience function.
         matches = analyze_license_file(test_file, top_n=3, spdx_dir=self.spdx_dir)
 
-        # Analyzer should be initialized with correct args
+        # Analyzer should be initialized with only the spdx_dir argument passed by the convenience func.
+        # The other arguments default to None if not explicitly passed.
         mock_analyzer_class.assert_called_once_with(
-            spdx_dir=self.spdx_dir, # This is the argument passed
-            cache_dir=None, # This is the default passed (None) by `analyze_license_file` as it doesn't specify it
-            embedding_model_name="all-MiniLM-L6-v2", # This is the default from LicenseAnalyzer's __init__
-            db_progress_callback=None # This is the default from LicenseAnalyzer's __init__
+            spdx_dir=self.spdx_dir,
         )
         # analyze_file should be called with top_n and the new per_entry_embed_callback (which is ANY for convenience funcs)
         mock_analyzer_instance.analyze_file.assert_called_once_with(test_file, 3, per_entry_embed_callback=unittest.mock.ANY)
@@ -563,12 +571,9 @@ class TestConvenienceFunctions(unittest.TestCase):
         test_text = "MIT License test"
         matches = analyze_license_text(test_text, top_n=5, spdx_dir=self.spdx_dir)
 
-        # Corrected assertion for LicenseAnalyzer arguments
+        # Analyzer should be initialized with only the spdx_dir argument passed by the convenience func.
         mock_analyzer_class.assert_called_once_with(
-            spdx_dir=self.spdx_dir, # This is the argument passed
-            cache_dir=None, # This is the default passed (None) by `analyze_license_text` as it doesn't specify it
-            embedding_model_name="all-MiniLM-L6-v2", # Default from LicenseAnalyzer's __init__
-            db_progress_callback=None # Default from LicenseAnalyzer's __init__
+            spdx_dir=self.spdx_dir,
         )
         mock_analyzer_instance.analyze_text.assert_called_once_with(test_text, 5, per_entry_embed_callback=unittest.mock.ANY)
         self.assertEqual(len(matches), 1)
