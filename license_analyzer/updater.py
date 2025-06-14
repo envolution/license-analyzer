@@ -117,8 +117,8 @@ class LicenseUpdater:
 
                 # Initialize progress for download phase
                 if progress_callback:
-                    # Pass the known total size here
-                    progress_callback(0, total_size, "[yellow]Downloading SPDX data...")
+                    # Pass the known total size here, use plain text status message
+                    progress_callback(0, total_size, "Downloading SPDX data...")
 
                 downloaded_size = 0
                 with open(download_path, "wb") as f:
@@ -127,14 +127,15 @@ class LicenseUpdater:
                         downloaded_size += len(chunk)
                         if progress_callback:
                             # Update completed bytes. The total size is already set.
+                            # Use plain text status message
                             progress_callback(
                                 downloaded_size,
                                 total_size,
-                                "[yellow]Downloading SPDX data...",
+                                "Downloading SPDX data...",
                             )
             logger.debug("Download complete.")
 
-            # Clear existing data... (existing code)
+            # Clear existing data...
             if self.spdx_data_dir.exists():
                 logger.debug(f"Clearing existing license data in {self.spdx_data_dir}")
                 for item in self.spdx_data_dir.iterdir():
@@ -175,14 +176,13 @@ class LicenseUpdater:
 
             if progress_callback:
                 # Reset progress for extraction phase, using file count as total
+                # Use plain text status message
                 progress_callback(
-                    0, members_to_extract_count, "[yellow]Extracting files..."
+                    0, members_to_extract_count, "Extracting files..."
                 )
             # --- END Extraction Progress Setup ---
 
             with tarfile.open(download_path, "r:gz") as tar:
-                # Root dir name should be reliable from previous check, but safer to re-confirm
-                # or pass it. For simplicity, we re-find it here.
                 current_root_dir_name = None
                 for member in tar.getmembers():
                     if "/" not in member.name and member.isdir():
@@ -199,7 +199,9 @@ class LicenseUpdater:
                         relative_path = Path(member.name).relative_to(
                             f"{current_root_dir_name}/text/"
                         )
-                        target_path = self.spdx_data_dir / relative_path
+                        # Store extracted files without .txt suffix
+                        target_filename = relative_path.stem if relative_path.suffix == ".txt" else relative_path.name
+                        target_path = self.spdx_data_dir / target_filename
 
                         if member.isdir():
                             target_path.mkdir(parents=True, exist_ok=True)
@@ -211,10 +213,11 @@ class LicenseUpdater:
                             extracted_count += 1
                             if progress_callback:
                                 # Update progress with files extracted vs total files for extraction
+                                # Use plain text status message
                                 progress_callback(
                                     extracted_count,
                                     members_to_extract_count,
-                                    "[yellow]Extracting files...",
+                                    "Extracting files...",
                                 )
 
             logger.debug("Extraction complete.")
@@ -251,6 +254,11 @@ class LicenseUpdater:
 
         # Always check remote for initial determination, but avoid re-download if up-to-date
         logger.info("Checking for new SPDX license data releases...")
+        
+        # Initial status for checking updates, total=0 for indeterminate progress initially
+        if progress_callback:
+            progress_callback(0, 0, "Checking for updates...")
+
         release_info = self._fetch_latest_release_info()
         if not release_info:
             return False, "Could not get latest release info. Check network connection."
@@ -328,7 +336,7 @@ class LicenseUpdater:
             logger.info(
                 f"License data version '{last_version}' already checked today and is up-to-date with latest '{latest_tag}'."
             )
-            return False, f"License data is already up-to-date (v{last_version})."
+            return False, f"License data is already up-to-date ({last_version})."
 
     def get_spdx_data_path(self) -> Path:
         """Returns the path where SPDX license data is stored."""

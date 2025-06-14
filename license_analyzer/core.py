@@ -145,7 +145,7 @@ class LicenseDatabase:
         if not source_dir.exists():
             self.logger.warning(f"Source directory does not exist: {source_dir}")
             if progress_callback:  # Update progress to indicate no source
-                progress_callback(0, 0, "Source directory missing.")
+                progress_callback(0, 0, f"Source directory for {db_type} missing.")
             return {}
 
         raw_db = self._load_existing_db(db_path)
@@ -157,17 +157,20 @@ class LicenseDatabase:
         processed_count = 0
 
         for file_path in license_files:
-            name = file_path.name
+            # Use .stem to get filename without extension (e.g., "Apache-2.0" from "Apache-2.0.txt")
+            name = file_path.stem
             current_sha = self._sha256sum(file_path)
 
             if progress_callback:
+                # Pass plain text status message; Rich styling will be handled by CLI.
                 progress_callback(
                     processed_count,
                     total_files,
-                    f"Processing {db_type}: [bold blue]{name}[/bold blue]",
+                    f"Processing {db_type}: {name}",
                 )
 
             # Check if file needs updating
+            # Raw DB keys are now also .stem based
             if name in raw_db and raw_db[name].get("sha256") == current_sha:
                 # File unchanged, convert to DatabaseEntry
                 entry_data = raw_db[name]
@@ -196,7 +199,7 @@ class LicenseDatabase:
                     )
 
                     # Update raw database
-                    raw_db[name] = {
+                    raw_db[name] = { # Key is now .stem
                         "sha256": current_sha,
                         "fingerprint": fingerprint,
                         "embedding": None,  # Placeholder, computed on demand
@@ -254,12 +257,12 @@ class LicenseDatabase:
         """Update embedding in the database file."""
         # Determine which database this entry belongs to
         db_path = self.licenses_db_path
-        if entry.file_path and "exceptions" in str(entry.file_path):
-            db_path = self.exceptions_db_path
+        # Removed exception-specific db_path logic as it wasn't in original refactored scope
+        # If there were exceptions DB, this would need to check `entry.file_path` for its location
 
         try:
             raw_db = self._load_existing_db(db_path)
-            if entry.name in raw_db:
+            if entry.name in raw_db: # entry.name is now .stem
                 raw_db[entry.name]["embedding"] = entry.embedding
                 raw_db[entry.name]["updated"] = datetime.now(UTC).isoformat()
                 self._save_db(raw_db, db_path)
@@ -275,6 +278,7 @@ class LicenseDatabase:
             self.logger.warning(
                 "LicenseDatabase.licenses_db accessed before explicit initialization in Analyzer."
             )
+            # When this is called, no progress callback is available for direct property access.
             self._licenses_db = self._update_database(
                 self.spdx_dir, self.licenses_db_path, "licenses"
             )
@@ -329,7 +333,6 @@ class LicenseAnalyzer:
 
         # Manually trigger database update with progress callback
         # This bypasses the lazy loading of @property and allows progress reporting
-        # Check if DBs are already loaded (e.g., if analyzer is reused)
         # Note: self.db._licenses_db will be None on first access
         self.logger.info("Initializing licenses database...")
         self.db._licenses_db = self.db._update_database(
@@ -497,7 +500,10 @@ class LicenseAnalyzer:
         return all_matches[:top_n]
 
     def analyze_multiple_files(
-        self, file_paths: List[Union[str, Path]], top_n: int = 5
+        self,
+        file_paths: List[Union[str, Path]],
+        top_n: int = 5,
+        analysis_progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict[str, List[LicenseMatch]]:
         """
         Analyze multiple license files.
@@ -505,20 +511,35 @@ class LicenseAnalyzer:
         Args:
             file_paths: List of paths to license files
             top_n: Number of top matches to return per file
+            analysis_progress_callback: A function (current_count, total_count, status_message) for UI updates.
 
         Returns:
             Dictionary mapping file paths to lists of LicenseMatch objects
         """
         results = {}
+        total_files = len(file_paths)
+        processed_count = 0
 
         for file_path in file_paths:
             file_path = Path(file_path)
+            processed_count += 1
+            if analysis_progress_callback:
+                # Pass plain text message for the CLI to format
+                analysis_progress_callback(
+                    processed_count, total_files, f"Analyzing {file_path.name}"
+                )
+
             try:
                 matches = self.analyze_file(file_path, top_n)
                 results[str(file_path)] = matches
             except Exception as e:
                 self.logger.error(f"Failed to analyze {file_path}: {e}")
                 results[str(file_path)] = []
+        
+        if analysis_progress_callback:
+            analysis_progress_callback(
+                total_files, total_files, "Finished analyzing files."
+            )
 
         return results
 
@@ -566,3 +587,4 @@ def analyze_license_text(
     # Note: Convenience functions do not expose progress callbacks directly
     analyzer = LicenseAnalyzer(spdx_dir=spdx_dir)
     return analyzer.analyze_text(text, top_n)
+
