@@ -262,10 +262,8 @@ class TestLicenseAnalyzer(unittest.TestCase):
         """Test getting database statistics."""
         stats = self.analyzer.get_database_stats()
 
-        self.assertIn("licenses", stats)
-        self.assertIn("total", stats)
-        self.assertIsInstance(stats["licenses"], int)
-        self.assertEqual(stats["total"], stats["licenses"])
+        self.assertIn("total_licenses", stats)
+        self.assertIsInstance(stats["total_licenses"], int)
 
 
 class TestConvenienceFunctions(unittest.TestCase):
@@ -414,8 +412,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
         # Test database stats
         stats = analyzer.get_database_stats()
-        self.assertEqual(stats["licenses"], 2)  # MIT and Apache
-        self.assertEqual(stats["total"], 3)
+        self.assertEqual(stats["total_licenses"], 2)  # MIT and Apache
 
 
 if __name__ == "__main__":
