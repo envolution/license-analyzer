@@ -1,4 +1,3 @@
-
 # license_analyzer/core.py
 """
 License Analyzer Module
@@ -62,9 +61,9 @@ class LicenseDatabase:
         cache_dir: Path,
         embedding_model_name: str = "all-MiniLM-L6-v2",
     ):
-        self.spdx_dir = Path(spdx_dir) # Root of the SPDX git clone
+        self.spdx_dir = Path(spdx_dir)  # Root of the SPDX git clone
         # The actual text files are in a subdirectory of the git clone
-        self.spdx_text_dir = self.spdx_dir / "text" 
+        self.spdx_text_dir = self.spdx_dir / "text"
         self.cache_dir = Path(cache_dir)  # This is for internal database JSONs
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -149,7 +148,7 @@ class LicenseDatabase:
         # Change: Use self.spdx_text_dir instead of passed source_dir
         source_dir = self.spdx_text_dir
         db_path = self.licenses_db_path
-        db_type = "licenses" # Fixed type
+        db_type = "licenses"  # Fixed type
 
         if not source_dir.exists():
             self.logger.warning(f"Source directory does not exist: {source_dir}")
@@ -159,8 +158,12 @@ class LicenseDatabase:
 
         raw_db = self._load_existing_db(db_path)
         db = {}
-        updated_content_or_new_entry = False  # Tracks if SHA/fingerprint changed or new entry
-        forced_save_due_to_schema_consistency = False # Tracks if we need to save due to schema consistency issues
+        updated_content_or_new_entry = (
+            False  # Tracks if SHA/fingerprint changed or new entry
+        )
+        forced_save_due_to_schema_consistency = (
+            False  # Tracks if we need to save due to schema consistency issues
+        )
 
         all_license_candidates = []
         if source_dir.exists():
@@ -196,7 +199,9 @@ class LicenseDatabase:
                     name=name,
                     sha256=entry_data["sha256"],
                     fingerprint=entry_data["fingerprint"],
-                    embedding=entry_data.get("embedding"), # Preserve existing embedding if it exists
+                    embedding=entry_data.get(
+                        "embedding"
+                    ),  # Preserve existing embedding if it exists
                     updated=entry_data["updated"],
                     file_path=file_path,
                 )
@@ -234,10 +239,14 @@ class LicenseDatabase:
         # Check for deleted files (no longer in source_dir, but in raw_db)
         names_to_delete = [name for name in raw_db if name not in db]
         if names_to_delete:
-            self.logger.info(f"Removing {len(names_to_delete)} deleted licenses from database.")
+            self.logger.info(
+                f"Removing {len(names_to_delete)} deleted licenses from database."
+            )
             for name in names_to_delete:
                 del raw_db[name]
-            updated_content_or_new_entry = True # This counts as an update to the database
+            updated_content_or_new_entry = (
+                True  # This counts as an update to the database
+            )
 
         raw_db_to_save = {
             entry.name: {
@@ -323,11 +332,17 @@ class LicenseDatabase:
                     raw_db[entry.name]["updated"] = datetime.now(UTC).isoformat()
                     self._save_db(raw_db, db_path)
                 else:
-                    self.logger.warning(f"Skipping embedding save for {entry.name}: file content changed since last DB update.")
+                    self.logger.warning(
+                        f"Skipping embedding save for {entry.name}: file content changed since last DB update."
+                    )
             else:
-                self.logger.warning(f"Skipping embedding save for {entry.name}: entry not found in database anymore.")
+                self.logger.warning(
+                    f"Skipping embedding save for {entry.name}: entry not found in database anymore."
+                )
         except Exception as e:
-            self.logger.warning(f"Failed to update embedding in database for {entry.name}: {e}")
+            self.logger.warning(
+                f"Failed to update embedding in database for {entry.name}: {e}"
+            )
 
     @property
     def licenses_db(self) -> Dict[str, DatabaseEntry]:
@@ -390,17 +405,15 @@ class LicenseAnalyzer:
         # This bypasses the lazy loading of @property and allows progress reporting
         self.logger.info("Initializing licenses database...")
         # Now, _update_database no longer takes source_dir/db_type as args, it uses self.spdx_text_dir
-        self.db._licenses_db = self.db._update_database( 
-            db_progress_callback=db_progress_callback
+        self.db._licenses_db = self.db._update_database(
+            progress_callback=db_progress_callback
         )
 
     def analyze_file(
         self,
         file_path: Union[str, Path],
         top_n: int = 5,
-        per_entry_embed_callback: Optional[
-            Callable[[str], None]
-        ] = None,
+        per_entry_embed_callback: Optional[Callable[[str], None]] = None,
     ) -> List[LicenseMatch]:
         """
         Analyze a single license file.
@@ -430,9 +443,7 @@ class LicenseAnalyzer:
         self,
         text: str,
         top_n: int = 5,
-        per_entry_embed_callback: Optional[
-            Callable[[str], None]
-        ] = None,
+        per_entry_embed_callback: Optional[Callable[[str], None]] = None,
     ) -> List[LicenseMatch]:
         """
         Analyze license text.
@@ -550,9 +561,7 @@ class LicenseAnalyzer:
         all_matches = deduplicated_perfect_matches
 
         # Add embedding matches, avoiding duplicates already present in perfect_matches
-        seen_names: Set[str] = set(
-            m.name for m in all_matches
-        )
+        seen_names: Set[str] = set(m.name for m in all_matches)
         for m in embedding_matches:
             if m.name not in seen_names:
                 all_matches.append(m)
@@ -665,4 +674,3 @@ def analyze_license_text(
     """
     analyzer = LicenseAnalyzer(spdx_dir=spdx_dir)
     return analyzer.analyze_text(text, top_n)
-
