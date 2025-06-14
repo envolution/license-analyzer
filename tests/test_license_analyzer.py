@@ -27,12 +27,10 @@ class TestLicenseMatch(unittest.TestCase):
             name="MIT.txt",
             score=0.95,
             method=MatchMethod.EMBEDDING,
-            license_type="license",
         )
         self.assertEqual(match.name, "MIT.txt")
         self.assertEqual(match.score, 0.95)
         self.assertEqual(match.method, MatchMethod.EMBEDDING)
-        self.assertEqual(match.license_type, "license")
 
     def test_invalid_score_low(self):
         """Test that scores below 0.0 raise ValueError."""
@@ -72,11 +70,9 @@ class TestLicenseDatabase(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.spdx_dir = Path(self.temp_dir) / "spdx"
         self.cache_dir = Path(self.temp_dir) / "cache"
-        self.exceptions_dir = self.spdx_dir / "exceptions"
 
         # Create directory structure
         self.spdx_dir.mkdir(parents=True)
-        self.exceptions_dir.mkdir(parents=True)
         self.cache_dir.mkdir(parents=True)
 
         # Create test license files
@@ -103,7 +99,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE."""
 
         (self.spdx_dir / "MIT.txt").write_text(mit_content)
-        (self.exceptions_dir / "TestException.txt").write_text("Test exception content")
 
         self.db = LicenseDatabase(self.spdx_dir, self.cache_dir, "all-MiniLM-L6-v2")
 
@@ -153,10 +148,8 @@ SOFTWARE."""
         """Test database loading and updating."""
         # Access databases to trigger loading
         licenses_db = self.db.licenses_db
-        exceptions_db = self.db.exceptions_db
 
         self.assertIn("MIT.txt", licenses_db)
-        self.assertIn("TestException.txt", exceptions_db)
 
         # Check database entry structure
         mit_entry = licenses_db["MIT.txt"]
@@ -270,11 +263,9 @@ class TestLicenseAnalyzer(unittest.TestCase):
         stats = self.analyzer.get_database_stats()
 
         self.assertIn("licenses", stats)
-        self.assertIn("exceptions", stats)
         self.assertIn("total", stats)
         self.assertIsInstance(stats["licenses"], int)
-        self.assertIsInstance(stats["exceptions"], int)
-        self.assertEqual(stats["total"], stats["licenses"] + stats["exceptions"])
+        self.assertEqual(stats["total"], stats["licenses"])
 
 
 class TestConvenienceFunctions(unittest.TestCase):
@@ -342,11 +333,9 @@ class TestIntegration(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.spdx_dir = Path(self.temp_dir) / "spdx"
         self.cache_dir = Path(self.temp_dir) / "cache"
-        self.exceptions_dir = self.spdx_dir / "exceptions"
 
         # Create directory structure
         self.spdx_dir.mkdir(parents=True)
-        self.exceptions_dir.mkdir(parents=True)
         self.cache_dir.mkdir(parents=True)  # Ensure cache dir is created for analyzer
 
         # Create realistic license content
@@ -382,7 +371,6 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
         (self.spdx_dir / "MIT.txt").write_text(mit_license)
         (self.spdx_dir / "Apache-2.0.txt").write_text(apache_license)
-        (self.exceptions_dir / "TestException.txt").write_text("Test exception content")
 
     # CORRECTED: Patch sentence_transformers.util and sentence_transformers.SentenceTransformer
     @patch("sentence_transformers.util")
@@ -427,7 +415,6 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
         # Test database stats
         stats = analyzer.get_database_stats()
         self.assertEqual(stats["licenses"], 2)  # MIT and Apache
-        self.assertEqual(stats["exceptions"], 1)  # TestException
         self.assertEqual(stats["total"], 3)
 
 
