@@ -386,7 +386,7 @@ class LicenseAnalyzer:
         embedding_matches = []
 
         # Check for exact matches first
-        for name, (entry, entry_type) in all_entries.items():
+        for name, entry in all_entries.items():
             if text_sha == entry.sha256:
                 sha_matches.append(
                     LicenseMatch(
