@@ -59,7 +59,7 @@ class LicenseDatabase:
         self,
         spdx_dir: Path,  # This will now be the root of the git clone
         cache_dir: Path,
-        embedding_model_name: str = "all-MiniLM-L6-v2",
+        embedding_model_name: str = "all-MiniLM-L6-v3",
     ):
         self.spdx_dir = Path(spdx_dir)  # Root of the SPDX git clone
         # The actual text files are in a subdirectory of the git clone
