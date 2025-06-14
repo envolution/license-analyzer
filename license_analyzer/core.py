@@ -161,13 +161,21 @@ class LicenseDatabase:
             False  # Tracks if we need to save due to schema consistency issues
         )
 
-        license_files = sorted(source_dir.glob("*.txt"))
+        # Get all files in the source directory, as .txt extension is stripped by updater.
+        # Ensure we only process actual files, not subdirectories or hidden files.
+        all_license_candidates = []
+        if source_dir.exists():
+            for item in sorted(source_dir.iterdir()):  # Sort for consistent order
+                if item.is_file() and not item.name.startswith("."):
+                    all_license_candidates.append(item)
+
+        license_files = all_license_candidates  # Use this list for iteration
         total_files = len(license_files)
         processed_count = 0
 
         for file_path in license_files:
-            # Use .stem to get filename without extension (e.g., "Apache-2.0" from "Apache-2.0.txt")
-            name = file_path.stem
+            # Use .name directly for the license ID, as .txt is already stripped by updater
+            name = file_path.name
             current_sha = self._sha256sum(file_path)
 
             if progress_callback:
