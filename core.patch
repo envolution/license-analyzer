@@ -1,0 +1,68 @@
+--- a/core.py
++++ b/core.py
+@@ -147,7 +147,8 @@
+ 
+         raw_db = self._load_existing_db(db_path)
+         db = {}
+-        updated = False
++        updated_content_or_new_entry = False # Tracks if SHA/fingerprint changed or new entry
++        forced_save_due_to_schema_consistency = False # Tracks if we need to save due to schema consistency issues
+ 
+         license_files = sorted(source_dir.glob("*.txt"))
+         total_files = len(license_files)
+@@ -165,8 +166,13 @@
+             # Check if file needs updating
+             # Raw DB keys are now also .stem based
+             if name in raw_db and raw_db[name].get("sha256") == current_sha:
+-                # File unchanged, convert to DatabaseEntry
++                # File unchanged in content (SHA matches).
+                 entry_data = raw_db[name]
++
++                # Check if the entry in the existing DB is missing the 'embedding' field
++                if "embedding" not in entry_data or entry_data.get("embedding") is None:
++                    forced_save_due_to_schema_consistency = True # This indicates a schema consistency need
++
+                 db[name] = DatabaseEntry(
+                     name=name,
+                     sha256=entry_data["sha256"],
+@@ -190,17 +196,33 @@
+                         "updated": datetime.now(UTC).isoformat(),
+                     }
+ 
+-                    updated = True
++                    updated_content_or_new_entry = True
+                     self.logger.info(f"Updated {db_type}: {name}")
+ 
+                 except IOError as e:
+                     self.logger.error(f"Failed to read {file_path}: {e}")
+                     # Skip this file but continue processing others
+             processed_count += 1
+ 
+-        if updated:
+-            self._save_db(raw_db, db_path)
+-            self.logger.info(f"Updated {db_type} database: {db_path}")
++        # After processing all files, decide if we need to save the database.
++        # We need to save if:
++        # 1. Any file's content changed or new files were added (updated_content_or_new_entry).
++        # 2. Or, if the existing database (raw_db) was missing expected fields (like 'embedding')
++        #    for any entry that has not otherwise changed, to bring its schema up-to-date.
++        
++        # We need to build the 'raw_db_to_save' from 'db' because 'db' contains the DatabaseEntry objects
++        # with the correct structure and 'None' for embeddings if they are yet to be computed.
++        raw_db_to_save = {
++            entry.name: {
++                "sha256": entry.sha256,
++                "fingerprint": entry.fingerprint,
++                "embedding": entry.embedding, # This will be None for uncomputed embeddings
++                "updated": entry.updated,
++            } for entry in db.values()
++        }
++
++        if updated_content_or_new_entry or forced_save_due_to_schema_consistency or not db_path.exists():
++            self._save_db(raw_db_to_save, db_path) # Save the state derived from 'db'
++            self.logger.info(f"Updated/refreshed {db_type} database: {db_path}")
++        else:
++            self.logger.info(f"Database ({db_type}) is up-to-date with source files and schema.")
+ 
+         if progress_callback:
+             progress_callback(

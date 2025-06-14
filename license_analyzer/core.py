@@ -1,4 +1,3 @@
-
 # license_analyzer/core.py
 """
 License Analyzer Module
@@ -82,7 +81,9 @@ class LicenseDatabase:
             try:
                 from sentence_transformers import SentenceTransformer
 
-                self.logger.info(f"Loading embedding model: {self.embedding_model_name} (first time, may download)...")
+                self.logger.info(
+                    f"Loading embedding model: {self.embedding_model_name} (first time, may download)..."
+                )
                 # SentenceTransformer automatically logs download progress to the logger configured by RichHandler
                 self._embedding_model = SentenceTransformer(self.embedding_model_name)
                 self.logger.info(f"Loaded embedding model: {self.embedding_model_name}")
@@ -153,7 +154,12 @@ class LicenseDatabase:
 
         raw_db = self._load_existing_db(db_path)
         db = {}
-        updated = False
+        updated_content_or_new_entry = (
+            False  # Tracks if SHA/fingerprint changed or new entry
+        )
+        forced_save_due_to_schema_consistency = (
+            False  # Tracks if we need to save due to schema consistency issues
+        )
 
         license_files = sorted(source_dir.glob("*.txt"))
         total_files = len(license_files)
@@ -175,8 +181,14 @@ class LicenseDatabase:
             # Check if file needs updating
             # Raw DB keys are now also .stem based
             if name in raw_db and raw_db[name].get("sha256") == current_sha:
-                # File unchanged, convert to DatabaseEntry
+                # File unchanged in content (sha matches)
                 entry_data = raw_db[name]
+                # Check if the entry in the existing DB is missing the 'embedding' field
+                if "embedding" not in entry_data or entry_data.get("embedding") is None:
+                    forced_save_due_to_schema_consistency = (
+                        True  # This indicates a schema consistency need
+                    )
+
                 db[name] = DatabaseEntry(
                     name=name,
                     sha256=entry_data["sha256"],
@@ -202,14 +214,14 @@ class LicenseDatabase:
                     )
 
                     # Update raw database
-                    raw_db[name] = { # Key is now .stem
+                    raw_db[name] = {  # Key is now .stem
                         "sha256": current_sha,
                         "fingerprint": fingerprint,
                         "embedding": None,  # Placeholder, computed on demand
                         "updated": datetime.now(UTC).isoformat(),
                     }
 
-                    updated = True
+                    updated_content_or_new_entry = True
                     self.logger.info(f"Updated {db_type}: {name}")
 
                 except IOError as e:
@@ -217,9 +229,35 @@ class LicenseDatabase:
                     # Skip this file but continue processing others
             processed_count += 1
 
-        if updated:
-            self._save_db(raw_db, db_path)
-            self.logger.info(f"Updated {db_type} database: {db_path}")
+        # After processing all files, decide if we need to save the database.
+        # We need to save if:
+        # 1. Any file's content changed or new files were added (updated_content_or_new_entry).
+        # 2. Or, if the existing database (raw_db) was missing expected fields (like 'embedding')
+        #    for any entry that has not otherwise changed, to bring its schema up-to-date.
+
+        # We need to build the 'raw_db_to_save' from 'db' because 'db' contains the DatabaseEntry objects
+        # with the correct structure and 'None' for embeddings if they are yet to be computed.
+        raw_db_to_save = {
+            entry.name: {
+                "sha256": entry.sha256,
+                "fingerprint": entry.fingerprint,
+                "embedding": entry.embedding,  # This will be None for uncomputed embeddings
+                "updated": entry.updated,
+            }
+            for entry in db.values()
+        }
+
+        if (
+            updated_content_or_new_entry
+            or forced_save_due_to_schema_consistency
+            or not db_path.exists()
+        ):
+            self._save_db(raw_db_to_save, db_path)  # Save the state derived from 'db'
+            self.logger.info(f"Updated/refreshed {db_type} database: {db_path}")
+        else:
+            self.logger.info(
+                f"Database ({db_type}) is up-to-date with source files and schema."
+            )
 
         if progress_callback:
             progress_callback(
@@ -262,7 +300,7 @@ class LicenseDatabase:
 
         try:
             raw_db = self._load_existing_db(db_path)
-            if entry.name in raw_db: # entry.name is now .stem
+            if entry.name in raw_db:  # entry.name is now .stem
                 raw_db[entry.name]["embedding"] = entry.embedding
                 raw_db[entry.name]["updated"] = datetime.now(UTC).isoformat()
                 self._save_db(raw_db, db_path)
@@ -341,7 +379,9 @@ class LicenseAnalyzer:
         self,
         file_path: Union[str, Path],
         top_n: int = 5,
-        per_entry_embed_callback: Optional[Callable[[str], None]] = None, # New: for embedding progress
+        per_entry_embed_callback: Optional[
+            Callable[[str], None]
+        ] = None,  # New: for embedding progress
     ) -> List[LicenseMatch]:
         """
         Analyze a single license file.
@@ -371,7 +411,9 @@ class LicenseAnalyzer:
         self,
         text: str,
         top_n: int = 5,
-        per_entry_embed_callback: Optional[Callable[[str], None]] = None, # New: for embedding progress
+        per_entry_embed_callback: Optional[
+            Callable[[str], None]
+        ] = None,  # New: for embedding progress
     ) -> List[LicenseMatch]:
         """
         Analyze license text.
@@ -449,13 +491,17 @@ class LicenseAnalyzer:
                 text_embedding = self.db.embedding_model.encode(text)
 
                 for name, entry in all_entries.items():
-                    if any(match.name == name for match in deduplicated_perfect_matches):
+                    if any(
+                        match.name == name for match in deduplicated_perfect_matches
+                    ):
                         continue
 
                     try:
                         # Report progress for per-entry embedding computation/retrieval
                         if per_entry_embed_callback:
-                            per_entry_embed_callback(f"Computing embedding for {entry.name}...")
+                            per_entry_embed_callback(
+                                f"Computing embedding for {entry.name}..."
+                            )
 
                         entry_embedding = self.db._get_embedding(entry)
                         similarity_raw = float(
@@ -533,12 +579,14 @@ class LicenseAnalyzer:
         for file_path in file_paths:
             file_path = Path(file_path)
             processed_count += 1
-            
+
             # Define a nested callback for per-entry embedding computation within this file's analysis
             def per_entry_embed_callback(status_msg: str):
                 if analysis_progress_callback:
                     # Prepend the current file's name to the embedding status message
-                    analysis_progress_callback(processed_count, total_files, f"[{file_path.name}] {status_msg}")
+                    analysis_progress_callback(
+                        processed_count, total_files, f"[{file_path.name}] {status_msg}"
+                    )
 
             try:
                 # First, report that we're analyzing this file
@@ -546,14 +594,16 @@ class LicenseAnalyzer:
                     analysis_progress_callback(
                         processed_count, total_files, f"Analyzing {file_path.name}"
                     )
-                
+
                 # Pass the per_entry_embed_callback to analyze_file, which passes it to analyze_text
-                matches = self.analyze_file(file_path, top_n, per_entry_embed_callback=per_entry_embed_callback)
+                matches = self.analyze_file(
+                    file_path, top_n, per_entry_embed_callback=per_entry_embed_callback
+                )
                 results[str(file_path)] = matches
             except Exception as e:
                 self.logger.error(f"Failed to analyze {file_path}: {e}")
                 results[str(file_path)] = []
-        
+
         if analysis_progress_callback:
             analysis_progress_callback(
                 total_files, total_files, "Finished analyzing files."
@@ -605,4 +655,3 @@ def analyze_license_text(
     # Note: Convenience functions do not expose progress callbacks directly
     analyzer = LicenseAnalyzer(spdx_dir=spdx_dir)
     return analyzer.analyze_text(text, top_n)
-
