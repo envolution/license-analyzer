@@ -54,10 +54,7 @@ dev = [
 "license-analyzer" = "license_analyzer.cli:main"
 
 [tool.setuptools.packages]
-find = {}
-
-[tool.setuptools.exclude-package-data]
-"*" = ["build/*"]
+find = { include = ["license_analyzer"] }
 
 [tool.black]
 line-length = 100
