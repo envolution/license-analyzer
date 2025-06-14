@@ -395,7 +395,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
         # Should find exact match
         exact_matches = [m for m in matches if m.score == 1.0]
         self.assertGreater(len(exact_matches), 0)
-        self.assertEqual(exact_matches[0].name, "MIT.txt")
+        self.assertEqual(exact_matches[0].name, "MIT")
         self.assertEqual(exact_matches[0].method, MatchMethod.SHA256)
 
         # Test similarity match
