@@ -2,9 +2,10 @@
 import requests
 import json
 import shutil
-import tarfile
+import tarfile # tarfile import can be removed as tarball download is removed. Retaining for safety if not strictly sure.
 import re
 import logging
+import subprocess # Added for git commands
 from pathlib import Path
 from datetime import date, datetime, UTC
 from typing import Optional, Dict, Tuple, Callable, Any
@@ -12,10 +13,13 @@ from appdirs import user_cache_dir
 
 logger = logging.getLogger(__name__)
 
-SPDX_GITHUB_REPO = "spdx/license-list-data"
-SPDX_GITHUB_API_RELEASES = (
-    f"https://api.github.com/repos/{SPDX_GITHUB_REPO}/releases/latest"
+SPDX_GITHUB_REPO_URL = "https://github.com/spdx/license-list-data.git" # Changed to full URL for clone
+# SPDX_GITHUB_API_RELEASES is no longer strictly used for update logic, but kept if other API interactions are planned.
+# For now, it's safe to remove if it's truly not used. Given it's not removed, keeping it for the client.
+SPDX_GITHUB_API_RELEASES = ( 
+    f"https://api.github.com/repos/spdx/license-list-data/releases/latest"
 )
+SPDX_MAIN_BRANCH = "main" # Assume 'main' branch for the SPDX repo
 
 APP_NAME = "license-analyzer"
 APP_AUTHOR = "envolution"
@@ -23,50 +27,49 @@ APP_AUTHOR = "envolution"
 
 class LicenseUpdater:
     """
-    Manages downloading and updating SPDX license data from GitHub.
+    Manages downloading and updating SPDX license data from GitHub using Git sparse checkout.
     """
 
     def __init__(
         self, cache_dir: Optional[Path] = None, spdx_data_dir: Optional[Path] = None
     ):
         if cache_dir is None:
-            # Use appdirs for cross-platform cache directory
             self.cache_base_dir = Path(
                 user_cache_dir(appname=APP_NAME, appauthor=APP_AUTHOR)
             )
         else:
             self.cache_base_dir = Path(cache_dir)
 
-        # Directory where updater stores its internal state (last checked date, version)
         self.updater_cache_dir = self.cache_base_dir / "updater"
         self.updater_cache_dir.mkdir(parents=True, exist_ok=True)
         self.last_update_info_path = self.updater_cache_dir / "last_update_info.json"
 
-        # Directory where the actual SPDX license files will be stored, used by LicenseDatabase
+        # This directory will be the root of the git clone
         if spdx_data_dir is None:
             self.spdx_data_dir = self.cache_base_dir / "spdx"
         else:
             self.spdx_data_dir = Path(spdx_data_dir)
 
-        self.spdx_data_dir.mkdir(parents=True, exist_ok=True)
+        # The spdx_data_dir should *not* be created here; git clone handles it.
 
     def _get_last_checked_info(self) -> Tuple[Optional[str], Optional[str]]:
-        """Reads the last checked date and version from cache."""
+        """Reads the last checked licenseListVersion and date from cache."""
         if not self.last_update_info_path.exists():
             return None, None
         try:
             with open(self.last_update_info_path, "r", encoding="utf-8") as f:
                 info = json.load(f)
-            return info.get("last_version"), info.get("last_checked_date")
+            # Changed 'last_version' to 'last_license_list_version' for clarity
+            return info.get("last_license_list_version"), info.get("last_checked_date")
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(
                 f"Failed to read last update info from {self.last_update_info_path}: {e}"
             )
             return None, None
 
-    def _set_last_checked_info(self, version: str, checked_date: str) -> None:
-        """Writes the current version and checked date to cache."""
-        info = {"last_version": version, "last_checked_date": checked_date}
+    def _set_last_checked_info(self, license_list_version: str, checked_date: str) -> None:
+        """Writes the current licenseListVersion and checked date to cache."""
+        info = {"last_license_list_version": license_list_version, "last_checked_date": checked_date}
         try:
             with open(self.last_update_info_path, "w", encoding="utf-8") as f:
                 json.dump(info, f, indent=2, ensure_ascii=False)
@@ -75,164 +78,136 @@ class LicenseUpdater:
                 f"Failed to write last update info to {self.last_update_info_path}: {e}"
             )
 
-    def _fetch_latest_release_info(self) -> Optional[Dict]:
-        """Fetches latest release information from GitHub API."""
+    def _run_git_command(self, cmd: List[str], cwd: Optional[Path] = None) -> bool:
+        """Helper to run a git command and log output."""
+        full_cmd = ["git"] + cmd
         try:
-            response = requests.get(SPDX_GITHUB_API_RELEASES, timeout=10)
-            response.raise_for_status()  # Raise an exception for HTTP errors
-            release_info = response.json()
-            return release_info
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to fetch latest release info from GitHub: {e}")
+            result = subprocess.run(
+                full_cmd,
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace"
+            )
+            logger.debug(f"Git command {' '.join(full_cmd)} output: {result.stdout.strip()}")
+            if result.stderr:
+                logger.debug(f"Git command {' '.join(full_cmd)} stderr: {result.stderr.strip()}")
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                f"Git command {' '.join(full_cmd)} failed in {cwd or 'current dir'} "
+                f"with exit code {e.returncode}:\nStdout: {e.stdout.strip()}\nStderr: {e.stderr.strip()}"
+            )
+            return False
+        except FileNotFoundError:
+            logger.error("Git command not found. Please ensure Git is installed and in your PATH.")
+            return False
+        except Exception as e:
+            logger.error(f"An unexpected error occurred while running git command: {e}")
+            return False
+
+    def _read_local_license_list_version(self) -> Optional[str]:
+        """Reads the licenseListVersion from the locally cloned json/licenses.json."""
+        licenses_json_path = self.spdx_data_dir / "json" / "licenses.json"
+        if not licenses_json_path.exists():
+            return None
+        try:
+            with open(licenses_json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("licenseListVersion")
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(
+                f"Failed to read licenseListVersion from {licenses_json_path}: {e}"
+            )
             return None
 
-    def _parse_version_from_tag(self, tag_name: str) -> Optional[Tuple[int, ...]]:
-        """Parses a numerical version tuple from a tag name like 'v3.24' or '3.24.0'."""
-        # Remove 'v' prefix if present
-        version_str = tag_name.lstrip("v")
-        # Split by dot and convert to integers
-        try:
-            return tuple(map(int, version_str.split(".")))
-        except ValueError:
-            logger.warning(f"Could not parse version from tag: {tag_name}")
-            return None
-
-    def _download_and_extract_licenses(
+    def _clone_and_sparse_checkout(
         self,
-        tarball_url: str,
-        version: str,
+        repo_path: Path,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> bool:
-        """
-        Downloads the tarball and extracts license texts to spdx_data_dir.
-        progress_callback: A function (current_bytes, total_bytes, status_message) for UI updates.
-        """
-        download_path = self.updater_cache_dir / f"{version}.tar.gz"
-        logger.debug(f"Downloading license data from {tarball_url} to {download_path}")
-
-        try:
-            with requests.get(tarball_url, stream=True, timeout=30) as r:
-                r.raise_for_status()
-                total_size = int(r.headers.get("content-length", 0))
-
-                # Initialize progress for download phase
-                if progress_callback:
-                    # Pass the known total size here, use plain text status message
-                    progress_callback(0, total_size, "Downloading SPDX data...")
-
-                downloaded_size = 0
-                with open(download_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        downloaded_size += len(chunk)
-                        if progress_callback:
-                            # Update completed bytes. The total size is already set.
-                            # Use plain text status message
-                            progress_callback(
-                                downloaded_size,
-                                total_size,
-                                "Downloading SPDX data...",
-                            )
-            logger.debug("Download complete.")
-
-            # Clear existing data...
-            if self.spdx_data_dir.exists():
-                logger.debug(f"Clearing existing license data in {self.spdx_data_dir}")
-                for item in self.spdx_data_dir.iterdir():
-                    if item.is_dir():
-                        shutil.rmtree(item)
-                    else:
-                        item.unlink()
+        """Clones the SPDX repo with sparse checkout and sets it up."""
+        # Clean up any existing directory if it's not a git repo or corrupted
+        if repo_path.exists():
+            if (repo_path / ".git").is_dir():
+                logger.debug(f"Repo already exists at {repo_path}. Not cloning.")
+                # This function is specifically for cloning, so if it exists, it's an error for this function.
+                # However, the check_for_updates logic should prevent calling this if it's an existing repo.
+                # Just in case, return True if it's a valid repo, as the desired state is met.
+                return True 
             else:
-                self.spdx_data_dir.mkdir(parents=True, exist_ok=True)
+                logger.warning(f"Removing non-git directory at {repo_path} before cloning.")
+                shutil.rmtree(repo_path)
 
-            logger.debug(f"Extracting license data to {self.spdx_data_dir}")
+        repo_path.parent.mkdir(parents=True, exist_ok=True) # Ensure parent directory exists
+        
+        if progress_callback:
+            progress_callback(0, 0, "Cloning SPDX repository (sparse checkout)...")
 
-            # --- BEGIN Extraction Progress Setup ---
-            # Re-open tarball to get member list for total count, without extracting yet
-            temp_tar_file = tarfile.open(download_path, "r:gz")
-            try:
-                root_dir_name = None
-                for member in temp_tar_file.getmembers():
-                    if "/" not in member.name and member.isdir():
-                        root_dir_name = member.name
-                        break
-                if root_dir_name is None:
-                    raise ValueError(
-                        "Could not find root directory in tarball for counting."
-                    )
-
-                # Count only files within 'text/' for accurate progress
-                members_to_extract_count = len(
-                    [
-                        member
-                        for member in temp_tar_file.getmembers()
-                        if member.name.startswith(f"{root_dir_name}/text/")
-                        and member.isfile()
-                    ]
-                )
-            finally:
-                temp_tar_file.close()  # Close after counting
-
-            if progress_callback:
-                # Reset progress for extraction phase, using file count as total
-                # Use plain text status message
-                progress_callback(
-                    0, members_to_extract_count, "Extracting files..."
-                )
-            # --- END Extraction Progress Setup ---
-
-            with tarfile.open(download_path, "r:gz") as tar:
-                current_root_dir_name = None
-                for member in tar.getmembers():
-                    if "/" not in member.name and member.isdir():
-                        current_root_dir_name = member.name
-                        break
-                if current_root_dir_name is None:
-                    raise ValueError(
-                        "Could not find root directory in tarball during extraction."
-                    )
-
-                extracted_count = 0
-                for member in tar.getmembers():
-                    if member.name.startswith(f"{current_root_dir_name}/text/"):
-                        relative_path = Path(member.name).relative_to(
-                            f"{current_root_dir_name}/text/"
-                        )
-                        # Store extracted files without .txt suffix, matching database keys
-                        target_filename = relative_path.stem if relative_path.suffix == ".txt" else relative_path.name
-                        target_path = self.spdx_data_dir / target_filename
-
-                        if member.isdir():
-                            target_path.mkdir(parents=True, exist_ok=True)
-                        elif member.isfile():  # Only count files for progress
-                            with tar.extractfile(member) as source_file, open(
-                                target_path, "wb"
-                            ) as dest_file:
-                                shutil.copyfileobj(source_file, dest_file)
-                            extracted_count += 1
-                            if progress_callback:
-                                # Update progress with files extracted vs total files for extraction
-                                # Use plain text status message
-                                progress_callback(
-                                    extracted_count,
-                                    members_to_extract_count,
-                                    "Extracting files...",
-                                )
-
-            logger.debug("Extraction complete.")
-            return True
-        except (
-            requests.exceptions.RequestException,
-            tarfile.TarError,
-            IOError,
-            ValueError,
-        ) as e:
-            logger.error(f"Failed to download or extract license data: {e}")
+        # 1. Clone with filter and no checkout
+        cmd = [
+            "clone",
+            "--filter=blob:none",
+            "--no-checkout",
+            SPDX_GITHUB_REPO_URL,
+            str(repo_path),
+        ]
+        if not self._run_git_command(cmd):
             return False
-        finally:
-            if download_path.exists():
-                download_path.unlink()  # Clean up the tarball
+
+        # 2. Change into the cloned directory
+        if not repo_path.is_dir(): # Check if clone actually created the directory
+            logger.error(f"Git clone failed to create directory: {repo_path}")
+            return False
+
+        # 3. Initialize sparse checkout
+        if not self._run_git_command(["sparse-checkout", "init", "--cone"], cwd=repo_path):
+            return False
+
+        # 4. Set sparse checkout paths
+        if not self._run_git_command(["sparse-checkout", "set", "text", "json"], cwd=repo_path):
+            return False
+        
+        # 5. Checkout the main branch
+        if not self._run_git_command(["checkout", SPDX_MAIN_BRANCH], cwd=repo_path):
+            return False
+
+        if progress_callback:
+            progress_callback(1, 1, "SPDX repository cloned and configured.")
+        logger.info(f"Successfully cloned and configured SPDX repo in {repo_path}")
+        return True
+
+    def _pull_sparse_checkout(
+        self,
+        repo_path: Path,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> bool:
+        """Pulls latest changes for an existing sparse checkout repo."""
+        if not (repo_path / ".git").is_dir():
+            logger.error(f"Not a git repository: {repo_path}")
+            return False
+        
+        if progress_callback:
+            progress_callback(0, 0, "Pulling latest SPDX changes...")
+
+        # Ensure we are on the main branch before pulling, and clean any local changes
+        if not self._run_git_command(["checkout", SPDX_MAIN_BRANCH], cwd=repo_path):
+             logger.warning(f"Failed to checkout {SPDX_MAIN_BRANCH} before pull in {repo_path}. Attempting pull anyway.")
+        
+        # Clean any local changes to prevent conflicts during pull
+        if not self._run_git_command(["reset", "--hard", f"origin/{SPDX_MAIN_BRANCH}"], cwd=repo_path):
+            logger.warning(f"Failed to hard reset {repo_path}. Pull might encounter conflicts.")
+        
+        cmd = ["pull", "origin", SPDX_MAIN_BRANCH]
+        if not self._run_git_command(cmd, cwd=repo_path):
+            return False
+        
+        if progress_callback:
+            progress_callback(1, 1, "SPDX repository synced.")
+        logger.info(f"Successfully pulled latest SPDX changes in {repo_path}")
+        return True
 
     def check_for_updates(
         self,
@@ -240,107 +215,80 @@ class LicenseUpdater:
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Tuple[bool, str]:
         """
-        Checks for and applies updates to the SPDX license database.
+        Checks for and applies updates to the SPDX license database using Git.
 
         Args:
             force: If True, forces an update check regardless of last check date.
-            progress_callback: Optional callable for download/extraction progress.
+            progress_callback: Optional callable for Git operation progress.
 
         Returns:
             Tuple[bool, str]: (True if an update was performed, status message).
         """
-        last_version, last_checked_date_str = self._get_last_checked_info()
+        last_license_list_version_cached, last_checked_date_str = self._get_last_checked_info()
         today_str = date.today().isoformat()
 
-        spdx_data_exists = self.spdx_data_dir.exists() and any(
-            self.spdx_data_dir.iterdir()
-        )
-
-        # 1. Early exit if already checked today and data exists, unless force update
-        if not force and spdx_data_exists and last_checked_date_str == today_str:
-            logger.info(f"SPDX data already checked today ({last_version}). Skipping update check.")
-            if progress_callback:
-                progress_callback(1, 1, f"SPDX data up-to-date ({last_version}).") # Force completion of indeterminate task
-            return False, f"License data is already up-to-date ({last_version})."
-
-        # If we reach here, we need to check for updates (either forced, not checked today, or no data yet)
-        logger.info("Checking for new SPDX license data releases...")
+        spdx_git_repo_root = self.spdx_data_dir
+        is_git_repo = (spdx_git_repo_root / ".git").is_dir()
         
-        # Initial status for checking updates, total=0 for indeterminate progress initially
+        # Check if json/licenses.json and text/ directory exists within the clone
+        # This provides a more robust check for "data exists" than just checking the root dir
+        spdx_data_valid = (spdx_git_repo_root / "json" / "licenses.json").exists() and \
+                          (spdx_git_repo_root / "text").is_dir()
+
+        # Initial status for checking updates
         if progress_callback:
-            progress_callback(0, 0, "Checking for updates...") # Indeterminate status
+            progress_callback(0, 0, "Checking for SPDX updates...")
 
-        release_info = self._fetch_latest_release_info()
-        if not release_info:
-            return False, "Could not get latest release info. Check network connection."
+        # If already checked today, data is valid, and not forced, then skip.
+        if not force and last_checked_date_str == today_str and is_git_repo and spdx_data_valid:
+            current_local_version_on_disk = self._read_local_license_list_version()
+            logger.info(f"SPDX data already checked today ({current_local_version_on_disk or 'unknown'}). Skipping update check.")
+            if progress_callback:
+                progress_callback(1, 1, f"SPDX data up-to-date ({current_local_version_on_disk or 'unknown'}).")
+            return False, f"License data is already up-to-date ({current_local_version_on_disk or 'unknown'})."
 
-        latest_tag = release_info.get("tag_name")
-        tarball_url = release_info.get("tarball_url")
+        # We need to perform a network operation (clone or pull) or re-clone if corrupted
+        updated_content = False
+        status_message = "No update performed."
+        
+        if not is_git_repo or not spdx_data_valid:
+            logger.info("SPDX data repository not found or invalid. Performing initial clone.")
+            if not self._clone_and_sparse_checkout(spdx_git_repo_root, progress_callback):
+                return False, "Initial clone of SPDX license data failed."
+            updated_content = True # Initial clone is always considered an update
+        else:
+            logger.info(f"SPDX repository found at {spdx_git_repo_root}. Pulling latest changes...")
+            if not self._pull_sparse_checkout(spdx_git_repo_root, progress_callback):
+                return False, "Failed to pull latest SPDX license data."
+            # After a successful pull, we will determine if the content changed by comparing versions.
 
-        if not latest_tag or not tarball_url:
-            return False, "Latest release info missing tag_name or tarball_url."
+        # Read the licenseListVersion *after* the clone/pull operation
+        current_local_version_on_disk = self._read_local_license_list_version()
 
-        latest_version_parsed = self._parse_version_from_tag(latest_tag)
-        # Default to a very old version if no last_version found, ensures initial download
-        last_version_parsed = (
-            self._parse_version_from_tag(last_version) if last_version else (0,)
-        )
+        if current_local_version_on_disk is None:
+            return False, "Could not determine SPDX license version after sync."
 
-        if not spdx_data_exists:
-            logger.info(
-                "SPDX data directory is empty or missing. Performing initial download."
-            )
-            if self._download_and_extract_licenses(
-                tarball_url, latest_tag, progress_callback
-            ):
-                self._set_last_checked_info(latest_tag, today_str)
-                return (
-                    True,
-                    f"Successfully initialized SPDX license data to version {latest_tag}.",
-                )
+        # Determine if an actual update occurred (version changed or it was a forced update)
+        if updated_content or force or (current_local_version_on_disk != last_license_list_version_cached):
+            updated_content = True
+            if last_license_list_version_cached:
+                status_message = f"Successfully updated SPDX license data from {last_license_list_version_cached} to {current_local_version_on_disk}."
             else:
-                return False, "Initial download of SPDX license data failed."
+                status_message = f"Successfully initialized SPDX license data to version {current_local_version_on_disk}."
+            logger.info(status_message)
+        else:
+            status_message = f"SPDX data is already up-to-date ({current_local_version_on_disk})."
+            logger.info(status_message)
+        
+        # Always update the last checked info after a successful sync attempt (whether content changed or not)
+        self._set_last_checked_info(current_local_version_on_disk, today_str)
 
-        # Scenario: Data exists. Decide whether to update based on force flag or version.
-        if force:
-            logger.info(
-                f"Forcing update. Downloading license data version {latest_tag}."
-            )
-            if self._download_and_extract_licenses(
-                tarball_url, latest_tag, progress_callback
-            ):
-                self._set_last_checked_info(latest_tag, today_str)
-                return (
-                    True,
-                    f"Successfully re-downloaded/updated SPDX license data to version {latest_tag} (forced update).",
-                )
-            else:
-                return False, "Forced update of SPDX license data failed."
-        elif latest_version_parsed > last_version_parsed:
-            logger.info(
-                f"New SPDX license data available: {latest_tag}. Updating from {last_version}..."
-            )
-            if self._download_and_extract_licenses(
-                tarball_url, latest_tag, progress_callback
-            ):
-                self._set_last_checked_info(latest_tag, today_str)
-                return (
-                    True,
-                    f"Successfully updated SPDX license data to version {latest_tag}.",
-                )
-            else:
-                return False, "Failed to update SPDX license data."
-        else: # latest_version_parsed <= last_version_parsed and (last_checked_date_str != today_str if not already handled above)
-            # This branch is reached if data exists, is not forced, and version is not newer.
-            # We already handled the `last_checked_date_str == today_str` case at the top.
-            # So, if we are here, it means version is same/older, AND last_checked_date_str != today_str.
-            # Thus, we mark it as checked today for the current version.
-            logger.info(
-                f"License data version '{last_version}' is up-to-date with latest '{latest_tag}'. Marked as checked today."
-            )
-            self._set_last_checked_info(last_version, today_str)
-            return False, f"License data is already up-to-date ({last_version})."
+        if progress_callback:
+            progress_callback(1, 1, status_message) # Ensure progress is marked complete
+
+        return updated_content, status_message
 
     def get_spdx_data_path(self) -> Path:
-        """Returns the path where SPDX license data is stored."""
+        """Returns the path where SPDX license data is stored (root of git clone)."""
         return self.spdx_data_dir
+
