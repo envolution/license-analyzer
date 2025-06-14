@@ -199,7 +199,7 @@ class LicenseUpdater:
                         relative_path = Path(member.name).relative_to(
                             f"{current_root_dir_name}/text/"
                         )
-                        # Store extracted files without .txt suffix
+                        # Store extracted files without .txt suffix, matching database keys
                         target_filename = relative_path.stem if relative_path.suffix == ".txt" else relative_path.name
                         target_path = self.spdx_data_dir / target_filename
 
@@ -252,12 +252,23 @@ class LicenseUpdater:
         last_version, last_checked_date_str = self._get_last_checked_info()
         today_str = date.today().isoformat()
 
-        # Always check remote for initial determination, but avoid re-download if up-to-date
+        spdx_data_exists = self.spdx_data_dir.exists() and any(
+            self.spdx_data_dir.iterdir()
+        )
+
+        # 1. Early exit if already checked today and data exists, unless force update
+        if not force and spdx_data_exists and last_checked_date_str == today_str:
+            logger.info(f"SPDX data already checked today ({last_version}). Skipping update check.")
+            if progress_callback:
+                progress_callback(1, 1, f"SPDX data up-to-date ({last_version}).") # Force completion of indeterminate task
+            return False, f"License data is already up-to-date ({last_version})."
+
+        # If we reach here, we need to check for updates (either forced, not checked today, or no data yet)
         logger.info("Checking for new SPDX license data releases...")
         
         # Initial status for checking updates, total=0 for indeterminate progress initially
         if progress_callback:
-            progress_callback(0, 0, "Checking for updates...")
+            progress_callback(0, 0, "Checking for updates...") # Indeterminate status
 
         release_info = self._fetch_latest_release_info()
         if not release_info:
@@ -273,11 +284,6 @@ class LicenseUpdater:
         # Default to a very old version if no last_version found, ensures initial download
         last_version_parsed = (
             self._parse_version_from_tag(last_version) if last_version else (0,)
-        )
-
-        # Check if SPDX data directory is empty or if it needs initial population
-        spdx_data_exists = self.spdx_data_dir.exists() and any(
-            self.spdx_data_dir.iterdir()
         )
 
         if not spdx_data_exists:
@@ -324,18 +330,15 @@ class LicenseUpdater:
                 )
             else:
                 return False, "Failed to update SPDX license data."
-        elif (
-            last_checked_date_str != today_str
-        ):  # Data is same version, but not checked today (daily check)
+        else: # latest_version_parsed <= last_version_parsed and (last_checked_date_str != today_str if not already handled above)
+            # This branch is reached if data exists, is not forced, and version is not newer.
+            # We already handled the `last_checked_date_str == today_str` case at the top.
+            # So, if we are here, it means version is same/older, AND last_checked_date_str != today_str.
+            # Thus, we mark it as checked today for the current version.
             logger.info(
                 f"License data version '{last_version}' is up-to-date with latest '{latest_tag}'. Marked as checked today."
             )
             self._set_last_checked_info(last_version, today_str)
-            return False, f"License data is already up-to-date ({last_version})."
-        else:  # latest_version_parsed <= last_version_parsed and checked today
-            logger.info(
-                f"License data version '{last_version}' already checked today and is up-to-date with latest '{latest_tag}'."
-            )
             return False, f"License data is already up-to-date ({last_version})."
 
     def get_spdx_data_path(self) -> Path:

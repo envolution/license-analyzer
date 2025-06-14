@@ -1,3 +1,4 @@
+
 # license_analyzer/cli.py
 #!/usr/bin/env python3
 """
@@ -54,7 +55,7 @@ console = Console()
 
 # Configure logging to use RichHandler for better output in verbose mode
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO, # Default to INFO, can be WARNING if not verbose
     format="%(message)s",
     handlers=[
         RichHandler(console=console, show_time=True, show_level=True, show_path=False)
@@ -197,16 +198,17 @@ Examples:
 
     try:
         # Initialize the updater first
-        # It needs its own cache dir and the spdx data dir
         updater = LicenseUpdater(
-            cache_dir=DEFAULT_CACHE_BASE_DIR,  # Base cache for updater's internal files
-            spdx_data_dir=args.spdx_dir,  # Where actual SPDX licenses go
+            cache_dir=DEFAULT_CACHE_BASE_DIR,
+            spdx_data_dir=args.spdx_dir,
         )
 
         update_performed = False
         update_message = ""
 
         # --- Handle update check with Rich Progress ---
+        # Using a Live context for a transient status message when total is None
+        # and a Progress bar when total is known (downloading/extracting)
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -221,30 +223,31 @@ Examples:
             console=console,
             transient=True,  # Hide progress bar when done
         ) as progress:
-            # Define a callback for updater to report progress
             updater_task_id = progress.add_task(
-                "[cyan]Checking for license updates...", total=None
+                "[cyan]Checking for license updates...", total=None # Start as indeterminate
             )
 
             def updater_progress_callback(current, total, status_msg):
-                # If total is 0, it means we're in an indeterminate phase (like "checking for updates...")
-                # If total > 0, it's a determinate phase (downloading, extracting files)
+                # If total is 0 (or None), it's indeterminate progress (e.g., "Checking for updates...")
+                # If total > 0, it's determinate progress (downloading, extracting files)
                 progress.update(
                     updater_task_id,
                     total=total if total > 0 else None, # Set total to None for indeterminate spinner
                     completed=current,
                     description=f"[cyan]{status_msg}", # status_msg is plain text from updater
                 )
-
+                
             # Perform the update check
+            # This call will use the updater_progress_callback for its updates
             update_performed, update_message = updater.check_for_updates(
                 force=args.update, progress_callback=updater_progress_callback
             )
-            # Ensure task is fully completed so it hides correctly if transient is true
-            # For non-download updates, it might just finish after a quick spin
+            
+            # Ensure the task is completed or removed, especially if it was indeterminate
             if progress.tasks[updater_task_id].total is None:
-                progress.update(updater_task_id, total=1, completed=1) # Force completion if it was indeterminate
+                progress.update(updater_task_id, total=1, completed=1, description=f"[cyan]{update_message}")
             progress.remove_task(updater_task_id) # Explicitly remove for clean exit
+
 
         if update_message:
             console.print(
@@ -300,12 +303,19 @@ Examples:
             if len(file_paths_to_analyze) == 1:
                 # For a single file, a simple Status spinner is more elegant
                 file_path = file_paths_to_analyze[0]
-                with Status(
+                # Using Live for Status to ensure it cleans up correctly even on errors
+                with Live(
                     f"[cyan]Analyzing [bold]{file_path.name}[/bold]...",
                     spinner="moon",
                     console=console,
-                ) as analysis_status:
-                    matches = analyzer.analyze_file(file_path, args.top_n)
+                    refresh_per_second=4,
+                    transient=True,
+                ) as live_status:
+                    # Define a dummy per_entry_embed_callback to update the Status message
+                    def per_entry_embed_callback(status_msg: str):
+                        live_status.update(f"[cyan]Analyzing [bold]{file_path.name}[/bold]: {status_msg}")
+
+                    matches = analyzer.analyze_file(file_path, args.top_n, per_entry_embed_callback=per_entry_embed_callback)
                     matches = [m for m in matches if m.score >= args.min_score]
                     results = {str(file_path): matches}
                 console.print("\n") # Newline after single file analysis status
@@ -313,7 +323,7 @@ Examples:
                 # For multiple files, use a Progress bar
                 with Progress(
                     SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
+                    TextColumn("[progress.description]{task.description}"), # This will show the dynamic messages
                     BarColumn(),
                     "{task.completed} of {task.total}",
                     console=console,
@@ -324,7 +334,7 @@ Examples:
                     )
 
                     def analysis_progress_callback(current, total, status_msg):
-                        # status_msg is plain text from core.py
+                        # status_msg comes from LicenseAnalyzer and can include embedding details
                         analysis_progress.update(
                             analysis_task,
                             completed=current,
@@ -345,7 +355,7 @@ Examples:
 
 
             # Analysis done, print results
-            console.print("\n")  # Add a newline after spinner for cleaner output
+            console.print("\n")  # Add a newline after progress bar for cleaner output
             if args.format == "json":
                 console.print(format_json_output(results))
             elif args.format == "csv":

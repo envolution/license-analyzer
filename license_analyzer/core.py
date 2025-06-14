@@ -1,3 +1,4 @@
+
 # license_analyzer/core.py
 """
 License Analyzer Module
@@ -81,6 +82,8 @@ class LicenseDatabase:
             try:
                 from sentence_transformers import SentenceTransformer
 
+                self.logger.info(f"Loading embedding model: {self.embedding_model_name} (first time, may download)...")
+                # SentenceTransformer automatically logs download progress to the logger configured by RichHandler
                 self._embedding_model = SentenceTransformer(self.embedding_model_name)
                 self.logger.info(f"Loaded embedding model: {self.embedding_model_name}")
             except ImportError:
@@ -255,10 +258,7 @@ class LicenseDatabase:
 
     def _update_embedding_in_db(self, entry: DatabaseEntry) -> None:
         """Update embedding in the database file."""
-        # Determine which database this entry belongs to
         db_path = self.licenses_db_path
-        # Removed exception-specific db_path logic as it wasn't in original refactored scope
-        # If there were exceptions DB, this would need to check `entry.file_path` for its location
 
         try:
             raw_db = self._load_existing_db(db_path)
@@ -286,7 +286,6 @@ class LicenseDatabase:
 
     def get_all_entries(self) -> Dict[str, DatabaseEntry]:  # Return type changed
         """Get all database entries."""
-        # SIMPLIFIED LOGIC:
         return self.licenses_db
 
 
@@ -299,7 +298,7 @@ class LicenseAnalyzer:
         cache_dir: Optional[Union[str, Path]] = None,
         embedding_model_name: str = "all-MiniLM-L6-v2",
         db_progress_callback: Optional[Callable[[int, int, str], None]] = None,
-    ):  # NEW callback
+    ):
         """
         Initialize the license analyzer.
 
@@ -333,14 +332,16 @@ class LicenseAnalyzer:
 
         # Manually trigger database update with progress callback
         # This bypasses the lazy loading of @property and allows progress reporting
-        # Note: self.db._licenses_db will be None on first access
         self.logger.info("Initializing licenses database...")
         self.db._licenses_db = self.db._update_database(
             self.db.spdx_dir, self.db.licenses_db_path, "licenses", db_progress_callback
         )
 
     def analyze_file(
-        self, file_path: Union[str, Path], top_n: int = 5
+        self,
+        file_path: Union[str, Path],
+        top_n: int = 5,
+        per_entry_embed_callback: Optional[Callable[[str], None]] = None, # New: for embedding progress
     ) -> List[LicenseMatch]:
         """
         Analyze a single license file.
@@ -348,6 +349,7 @@ class LicenseAnalyzer:
         Args:
             file_path: Path to the license file to analyze
             top_n: Number of top matches to return
+            per_entry_embed_callback: Callback for reporting progress during embedding computation.
 
         Returns:
             List of LicenseMatch objects sorted by score (descending)
@@ -363,15 +365,21 @@ class LicenseAnalyzer:
         except IOError as e:
             raise IOError(f"Failed to read license file {file_path}: {e}")
 
-        return self.analyze_text(text, top_n)
+        return self.analyze_text(text, top_n, per_entry_embed_callback)
 
-    def analyze_text(self, text: str, top_n: int = 5) -> List[LicenseMatch]:
+    def analyze_text(
+        self,
+        text: str,
+        top_n: int = 5,
+        per_entry_embed_callback: Optional[Callable[[str], None]] = None, # New: for embedding progress
+    ) -> List[LicenseMatch]:
         """
         Analyze license text.
 
         Args:
             text: License text to analyze
             top_n: Number of top matches to return
+            per_entry_embed_callback: Callback for reporting progress during embedding computation.
 
         Returns:
             List of LicenseMatch objects sorted by score (descending)
@@ -411,7 +419,6 @@ class LicenseAnalyzer:
         if sha_matches or fingerprint_matches:
             perfect_matches = sha_matches + fingerprint_matches
             # Deduplicate perfect matches if a license matched by both SHA and fingerprint
-            # For now, a simple unique by name would be ok as score is same.
             seen_names: Set[str] = set()
             deduplicated_perfect_matches = []
             for m in perfect_matches:
@@ -436,17 +443,20 @@ class LicenseAnalyzer:
             try:
                 from sentence_transformers import util
 
+                # Note: The first time embedding_model is accessed, it might download the model.
+                # This download progress is handled by sentence-transformers' internal logging,
+                # which RichHandler will display if verbose logging is enabled.
                 text_embedding = self.db.embedding_model.encode(text)
 
                 for name, entry in all_entries.items():
-                    # Skip if already in perfect matches (only necessary if perfect_matches is passed into this loop)
-                    # Currently, `all_entries` is fixed, so this check is valid.
-                    if any(
-                        match.name == name for match in deduplicated_perfect_matches
-                    ):
+                    if any(match.name == name for match in deduplicated_perfect_matches):
                         continue
 
                     try:
+                        # Report progress for per-entry embedding computation/retrieval
+                        if per_entry_embed_callback:
+                            per_entry_embed_callback(f"Computing embedding for {entry.name}...")
+
                         entry_embedding = self.db._get_embedding(entry)
                         similarity_raw = float(
                             util.cos_sim(text_embedding, entry_embedding)[0][0]
@@ -523,14 +533,22 @@ class LicenseAnalyzer:
         for file_path in file_paths:
             file_path = Path(file_path)
             processed_count += 1
-            if analysis_progress_callback:
-                # Pass plain text message for the CLI to format
-                analysis_progress_callback(
-                    processed_count, total_files, f"Analyzing {file_path.name}"
-                )
+            
+            # Define a nested callback for per-entry embedding computation within this file's analysis
+            def per_entry_embed_callback(status_msg: str):
+                if analysis_progress_callback:
+                    # Prepend the current file's name to the embedding status message
+                    analysis_progress_callback(processed_count, total_files, f"[{file_path.name}] {status_msg}")
 
             try:
-                matches = self.analyze_file(file_path, top_n)
+                # First, report that we're analyzing this file
+                if analysis_progress_callback:
+                    analysis_progress_callback(
+                        processed_count, total_files, f"Analyzing {file_path.name}"
+                    )
+                
+                # Pass the per_entry_embed_callback to analyze_file, which passes it to analyze_text
+                matches = self.analyze_file(file_path, top_n, per_entry_embed_callback=per_entry_embed_callback)
                 results[str(file_path)] = matches
             except Exception as e:
                 self.logger.error(f"Failed to analyze {file_path}: {e}")
