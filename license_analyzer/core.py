@@ -20,6 +20,7 @@ from appdirs import user_cache_dir
 
 class MatchMethod(Enum):
     """Enumeration of available matching methods."""
+
     SHA256 = "sha256"
     FINGERPRINT = "fingerprint"
     EMBEDDING = "embedding"
@@ -28,6 +29,7 @@ class MatchMethod(Enum):
 @dataclass
 class LicenseMatch:
     """Represents a license match result."""
+
     name: str
     score: float
     method: MatchMethod
@@ -42,6 +44,7 @@ class LicenseMatch:
 @dataclass
 class DatabaseEntry:
     """Represents a license database entry."""
+
     name: str
     sha256: str
     fingerprint: str
@@ -53,10 +56,15 @@ class DatabaseEntry:
 class LicenseDatabase:
     """Manages the license database with lazy loading and caching."""
 
-    def __init__(self, spdx_dir: Path, cache_dir: Path, embedding_model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(
+        self,
+        spdx_dir: Path,
+        cache_dir: Path,
+        embedding_model_name: str = "all-MiniLM-L6-v2",
+    ):
         self.spdx_dir = Path(spdx_dir)
         self.exceptions_dir = self.spdx_dir / "exceptions"
-        self.cache_dir = Path(cache_dir) # This is for internal database JSONs
+        self.cache_dir = Path(cache_dir)  # This is for internal database JSONs
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.embedding_model_name = embedding_model_name
@@ -76,10 +84,13 @@ class LicenseDatabase:
         if self._embedding_model is None:
             try:
                 from sentence_transformers import SentenceTransformer
+
                 self._embedding_model = SentenceTransformer(self.embedding_model_name)
                 self.logger.info(f"Loaded embedding model: {self.embedding_model_name}")
             except ImportError:
-                raise ImportError("sentence-transformers is required for embedding-based matching. Please install it with pip install sentence-transformers")
+                raise ImportError(
+                    "sentence-transformers is required for embedding-based matching. Please install it with pip install sentence-transformers"
+                )
         return self._embedding_model
 
     def _sha256sum(self, path: Path) -> str:
@@ -92,7 +103,7 @@ class LicenseDatabase:
 
     def _sha256sum_text(self, text: str) -> str:
         """Calculate SHA256 hash of text."""
-        return hashlib.sha256(text.encode('utf-8')).hexdigest()
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def _normalize_text(self, text: str) -> str:
         """Normalize text for consistent processing."""
@@ -101,7 +112,7 @@ class LicenseDatabase:
     def _canonical_fingerprint(self, text: str) -> str:
         """Generate canonical fingerprint from text."""
         tokens = sorted(set(self._normalize_text(text).split()))
-        return hashlib.sha256(" ".join(tokens).encode('utf-8')).hexdigest()
+        return hashlib.sha256(" ".join(tokens).encode("utf-8")).hexdigest()
 
     def _load_existing_db(self, db_path: Path) -> Dict[str, dict]:
         """Load existing database from JSON file."""
@@ -109,7 +120,7 @@ class LicenseDatabase:
             return {}
 
         try:
-            with open(db_path, 'r', encoding='utf-8') as f:
+            with open(db_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError) as e:
             self.logger.warning(f"Failed to load database {db_path}: {e}")
@@ -118,21 +129,26 @@ class LicenseDatabase:
     def _save_db(self, db: Dict[str, dict], db_path: Path) -> None:
         """Save database to JSON file."""
         try:
-            with open(db_path, 'w', encoding='utf-8') as f:
+            with open(db_path, "w", encoding="utf-8") as f:
                 json.dump(db, f, indent=2, ensure_ascii=False)
         except IOError as e:
             self.logger.error(f"Failed to save database {db_path}: {e}")
             raise
 
-    def _update_database(self, source_dir: Path, db_path: Path, db_type: str,
-                         progress_callback: Optional[Callable[[int, int, str], None]] = None) -> Dict[str, DatabaseEntry]:
+    def _update_database(
+        self,
+        source_dir: Path,
+        db_path: Path,
+        db_type: str,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> Dict[str, DatabaseEntry]:
         """
         Update database from source directory.
         progress_callback: A function (current_count, total_count, status_message) for UI updates.
         """
         if not source_dir.exists():
             self.logger.warning(f"Source directory does not exist: {source_dir}")
-            if progress_callback: # Update progress to indicate no source
+            if progress_callback:  # Update progress to indicate no source
                 progress_callback(0, 0, "Source directory missing.")
             return {}
 
@@ -149,7 +165,11 @@ class LicenseDatabase:
             current_sha = self._sha256sum(file_path)
 
             if progress_callback:
-                progress_callback(processed_count, total_files, f"Processing {db_type}: [bold blue]{name}[/bold blue]")
+                progress_callback(
+                    processed_count,
+                    total_files,
+                    f"Processing {db_type}: [bold blue]{name}[/bold blue]",
+                )
 
             # Check if file needs updating
             if name in raw_db and raw_db[name].get("sha256") == current_sha:
@@ -161,12 +181,12 @@ class LicenseDatabase:
                     fingerprint=entry_data["fingerprint"],
                     embedding=entry_data.get("embedding"),
                     updated=entry_data["updated"],
-                    file_path=file_path
+                    file_path=file_path,
                 )
             else:
                 # File is new or changed
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
+                    with open(file_path, "r", encoding="utf-8") as f:
                         text = f.read()
 
                     fingerprint = self._canonical_fingerprint(text)
@@ -176,7 +196,7 @@ class LicenseDatabase:
                         sha256=current_sha,
                         fingerprint=fingerprint,
                         embedding=None,  # Will be computed on demand
-                        file_path=file_path
+                        file_path=file_path,
                     )
 
                     # Update raw database
@@ -184,7 +204,7 @@ class LicenseDatabase:
                         "sha256": current_sha,
                         "fingerprint": fingerprint,
                         "embedding": None,  # Placeholder, computed on demand
-                        "updated": datetime.now(UTC).isoformat()
+                        "updated": datetime.now(UTC).isoformat(),
                     }
 
                     updated = True
@@ -200,7 +220,9 @@ class LicenseDatabase:
             self.logger.info(f"Updated {db_type} database: {db_path}")
 
         if progress_callback:
-            progress_callback(total_files, total_files, f"Finished {db_type} database update.")
+            progress_callback(
+                total_files, total_files, f"Finished {db_type} database update."
+            )
 
         return db
 
@@ -212,7 +234,7 @@ class LicenseDatabase:
         # Need to compute embedding
         if entry.file_path and entry.file_path.exists():
             try:
-                with open(entry.file_path, 'r', encoding='utf-8') as f:
+                with open(entry.file_path, "r", encoding="utf-8") as f:
                     text = f.read()
 
                 embedding = self.embedding_model.encode(text)
@@ -223,10 +245,14 @@ class LicenseDatabase:
 
                 return embedding
             except IOError as e:
-                self.logger.error(f"Failed to read file for embedding: {entry.file_path}: {e}")
+                self.logger.error(
+                    f"Failed to read file for embedding: {entry.file_path}: {e}"
+                )
                 raise
         else:
-            raise ValueError(f"Cannot compute embedding for {entry.name}: file not found")
+            raise ValueError(
+                f"Cannot compute embedding for {entry.name}: file not found"
+            )
 
     def _update_embedding_in_db(self, entry: DatabaseEntry) -> None:
         """Update embedding in the database file."""
@@ -250,7 +276,9 @@ class LicenseDatabase:
         # This property is now effectively bypassed during initial LicenseAnalyzer.__init__
         # but kept for potential direct usage if needed elsewhere.
         if self._licenses_db is None:
-            self.logger.warning("LicenseDatabase.licenses_db accessed before explicit initialization in Analyzer.")
+            self.logger.warning(
+                "LicenseDatabase.licenses_db accessed before explicit initialization in Analyzer."
+            )
             self._licenses_db = self._update_database(
                 self.spdx_dir, self.licenses_db_path, "licenses"
             )
@@ -261,7 +289,9 @@ class LicenseDatabase:
         """Get exceptions database, updating if necessary."""
         # Similar to licenses_db, this is bypassed by Analyzer's explicit init
         if self._exceptions_db is None:
-            self.logger.warning("LicenseDatabase.exceptions_db accessed before explicit initialization in Analyzer.")
+            self.logger.warning(
+                "LicenseDatabase.exceptions_db accessed before explicit initialization in Analyzer."
+            )
             self._exceptions_db = self._update_database(
                 self.exceptions_dir, self.exceptions_db_path, "exceptions"
             )
@@ -283,10 +313,13 @@ class LicenseDatabase:
 class LicenseAnalyzer:
     """Main license analyzer class."""
 
-    def __init__(self, spdx_dir: Optional[Union[str, Path]] = None,
-                 cache_dir: Optional[Union[str, Path]] = None,
-                 embedding_model_name: str = "all-MiniLM-L6-v2",
-                 db_progress_callback: Optional[Callable[[int, int, str], None]] = None): # NEW callback
+    def __init__(
+        self,
+        spdx_dir: Optional[Union[str, Path]] = None,
+        cache_dir: Optional[Union[str, Path]] = None,
+        embedding_model_name: str = "all-MiniLM-L6-v2",
+        db_progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ):  # NEW callback
         """
         Initialize the license analyzer.
 
@@ -299,16 +332,21 @@ class LicenseAnalyzer:
         """
         if cache_dir is None:
             # Main cache directory for the application
-            cache_dir = Path(user_cache_dir(appname="license-analyzer", appauthor="envolution")) / "db_cache"
+            cache_dir = (
+                Path(user_cache_dir(appname="license-analyzer", appauthor="envolution"))
+                / "db_cache"
+            )
         else:
             cache_dir = Path(cache_dir)
 
         if spdx_dir is None:
             # Default SPDX data directory is now within the main cache dir
-            spdx_dir = Path(user_cache_dir(appname="license-analyzer", appauthor="envolution")) / "spdx"
+            spdx_dir = (
+                Path(user_cache_dir(appname="license-analyzer", appauthor="envolution"))
+                / "spdx"
+            )
         else:
             spdx_dir = Path(spdx_dir)
-
 
         self.db = LicenseDatabase(spdx_dir, cache_dir, embedding_model_name)
         self.logger = logging.getLogger(__name__)
@@ -323,11 +361,15 @@ class LicenseAnalyzer:
         )
         self.logger.info("Initializing exceptions database...")
         self.db._exceptions_db = self.db._update_database(
-            self.db.exceptions_dir, self.db.exceptions_db_path, "exceptions", db_progress_callback
+            self.db.exceptions_dir,
+            self.db.exceptions_db_path,
+            "exceptions",
+            db_progress_callback,
         )
 
-
-    def analyze_file(self, file_path: Union[str, Path], top_n: int = 5) -> List[LicenseMatch]:
+    def analyze_file(
+        self, file_path: Union[str, Path], top_n: int = 5
+    ) -> List[LicenseMatch]:
         """
         Analyze a single license file.
 
@@ -344,7 +386,7 @@ class LicenseAnalyzer:
             raise FileNotFoundError(f"License file not found: {file_path}")
 
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 text = f.read()
         except IOError as e:
             raise IOError(f"Failed to read license file {file_path}: {e}")
@@ -377,13 +419,23 @@ class LicenseAnalyzer:
         # Check for exact matches first
         for name, (entry, entry_type) in all_entries.items():
             if text_sha == entry.sha256:
-                sha_matches.append(LicenseMatch(
-                    name=name, score=1.0, method=MatchMethod.SHA256, license_type=entry_type
-                ))
+                sha_matches.append(
+                    LicenseMatch(
+                        name=name,
+                        score=1.0,
+                        method=MatchMethod.SHA256,
+                        license_type=entry_type,
+                    )
+                )
             elif text_fingerprint == entry.fingerprint:
-                fingerprint_matches.append(LicenseMatch(
-                    name=name, score=1.0, method=MatchMethod.FINGERPRINT, license_type=entry_type
-                ))
+                fingerprint_matches.append(
+                    LicenseMatch(
+                        name=name,
+                        score=1.0,
+                        method=MatchMethod.FINGERPRINT,
+                        license_type=entry_type,
+                    )
+                )
 
         # If we have perfect matches, return them but also check for other perfect matches
         if sha_matches or fingerprint_matches:
@@ -397,7 +449,9 @@ class LicenseAnalyzer:
                     deduplicated_perfect_matches.append(m)
                     seen_names.add(m.name)
             # Sort unique perfect matches by method preference (SHA > Fingerprint)
-            deduplicated_perfect_matches.sort(key=lambda x: x.method == MatchMethod.SHA256, reverse=True)
+            deduplicated_perfect_matches.sort(
+                key=lambda x: x.method == MatchMethod.SHA256, reverse=True
+            )
 
             if len(deduplicated_perfect_matches) >= top_n:
                 return deduplicated_perfect_matches[:top_n]
@@ -417,31 +471,47 @@ class LicenseAnalyzer:
                 for name, (entry, entry_type) in all_entries.items():
                     # Skip if already in perfect matches (only necessary if perfect_matches is passed into this loop)
                     # Currently, `all_entries` is fixed, so this check is valid.
-                    if any(match.name == name for match in deduplicated_perfect_matches):
+                    if any(
+                        match.name == name for match in deduplicated_perfect_matches
+                    ):
                         continue
 
                     try:
                         entry_embedding = self.db._get_embedding(entry)
-                        similarity = float(util.cos_sim(text_embedding, entry_embedding)[0][0])
+                        similarity_raw = float(
+                            util.cos_sim(text_embedding, entry_embedding)[0][0]
+                        )
+                        similarity = max(0.0, float(similarity_raw))
 
-                        embedding_matches.append(LicenseMatch(
-                            name=name, score=similarity, method=MatchMethod.EMBEDDING, license_type=entry_type
-                        ))
+                        embedding_matches.append(
+                            LicenseMatch(
+                                name=name,
+                                score=similarity,
+                                method=MatchMethod.EMBEDDING,
+                                license_type=entry_type,
+                            )
+                        )
                     except Exception as e:
-                        self.logger.warning(f"Failed to compute embedding similarity for {name}: {e}")
+                        self.logger.warning(
+                            f"Failed to compute embedding similarity for {name}: {e}"
+                        )
                         continue
 
                 # Sort embedding matches by score
                 embedding_matches.sort(key=lambda x: x.score, reverse=True)
 
             except ImportError:
-                self.logger.warning("sentence-transformers not available, skipping embedding analysis")
+                self.logger.warning(
+                    "sentence-transformers not available, skipping embedding analysis"
+                )
 
         # Combine all matches
         all_matches = deduplicated_perfect_matches
 
         # Add embedding matches, avoiding duplicates already present in perfect_matches
-        seen_names: Set[str] = set(m.name for m in all_matches) # Re-init seen_names for clarity
+        seen_names: Set[str] = set(
+            m.name for m in all_matches
+        )  # Re-init seen_names for clarity
         for m in embedding_matches:
             if m.name not in seen_names:
                 all_matches.append(m)
@@ -449,12 +519,20 @@ class LicenseAnalyzer:
 
         # Sort by score (perfect matches first, then by similarity)
         # Prioritize SHA256 > FINGERPRINT > EMBEDDING for ties, and then by score
-        all_matches.sort(key=lambda x: (x.score, x.method == MatchMethod.SHA256, x.method == MatchMethod.FINGERPRINT), reverse=True)
+        all_matches.sort(
+            key=lambda x: (
+                x.score,
+                x.method == MatchMethod.SHA256,
+                x.method == MatchMethod.FINGERPRINT,
+            ),
+            reverse=True,
+        )
 
         return all_matches[:top_n]
 
-    def analyze_multiple_files(self, file_paths: List[Union[str, Path]],
-                             top_n: int = 5) -> Dict[str, List[LicenseMatch]]:
+    def analyze_multiple_files(
+        self, file_paths: List[Union[str, Path]], top_n: int = 5
+    ) -> Dict[str, List[LicenseMatch]]:
         """
         Analyze multiple license files.
 
@@ -483,13 +561,16 @@ class LicenseAnalyzer:
         return {
             "licenses": len(self.db.licenses_db),
             "exceptions": len(self.db.exceptions_db),
-            "total": len(self.db.licenses_db) + len(self.db.exceptions_db)
+            "total": len(self.db.licenses_db) + len(self.db.exceptions_db),
         }
 
 
 # Convenience functions for backward compatibility
-def analyze_license_file(file_path: Union[str, Path], top_n: int = 5,
-                        spdx_dir: Optional[Union[str, Path]] = None) -> List[LicenseMatch]:
+def analyze_license_file(
+    file_path: Union[str, Path],
+    top_n: int = 5,
+    spdx_dir: Optional[Union[str, Path]] = None,
+) -> List[LicenseMatch]:
     """
     Convenience function to analyze a single license file.
 
@@ -506,8 +587,9 @@ def analyze_license_file(file_path: Union[str, Path], top_n: int = 5,
     return analyzer.analyze_file(file_path, top_n)
 
 
-def analyze_license_text(text: str, top_n: int = 5,
-                        spdx_dir: Optional[Union[str, Path]] = None) -> List[LicenseMatch]:
+def analyze_license_text(
+    text: str, top_n: int = 5, spdx_dir: Optional[Union[str, Path]] = None
+) -> List[LicenseMatch]:
     """
     Convenience function to analyze license text.
 

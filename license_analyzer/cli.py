@@ -268,35 +268,35 @@ Examples:
             sys.exit(0)
 
         # --- Initialize Analyzer and build database with Rich Status/Progress ---
-        analyzer = None  # Initialize to None
+        analyzer = None
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            "{task.completed} of {task.total}",  # Show file count
+            console=console,
+            transient=True,
+        ) as db_progress:
+            db_task = db_progress.add_task(
+                "[green]Building license cache...", total=None
+            )
 
-        # Determine total files for progress bar during DB build
-        # This requires reading the directories first, potentially duplicating globbing.
-        # For simplicity, we'll use a spinner for DB build.
-        # If fine-grained progress is strictly required, LicenseDatabase needs to return total files
-        # before processing starts.
-
-        with Status(
-            "[green]Initializing license database...", spinner="dots", console=console
-        ) as db_status:
-            # Callback for LicenseAnalyzer's database update (for text updates on spinner)
             def db_progress_callback(current, total, status_msg):
-                # Update the status text. For this spinner, total/current aren't used for a bar,
-                # but could be used to display text like "Processed X of Y files".
-                if total and total > 0:
-                    db_status.update(
-                        f"[green]Building cache: {status_msg} ({current}/{total})[/green]"
-                    )
-                else:
-                    db_status.update(f"[green]Building cache: {status_msg}[/green]")
+                # This callback is fired by LicenseDatabase._update_database
+                db_progress.update(
+                    db_task,
+                    total=total,
+                    completed=current,
+                    description=f"[green]{status_msg}",
+                )
 
             analyzer = LicenseAnalyzer(
                 spdx_dir=args.spdx_dir,
                 cache_dir=args.cache_dir,
                 embedding_model_name=args.embedding_model,
-                db_progress_callback=db_progress_callback,  # Pass the callback
+                db_progress_callback=db_progress_callback,
             )
-        console.print("[green]License database initialized.[/green]")
+        console.print("[bold green]✔ License database is ready.[/bold green]")
 
         # --- Analyze files with Rich Status ---
         if args.files:
@@ -314,7 +314,7 @@ Examples:
 
                     # Filter by minimum score
                     matches = [m for m in matches if m.score >= args.min_score]
-                    results = {file_path: matches}
+                    results = {str(file_path): matches}
                 else:
                     analysis_status.update(
                         f"[cyan]Analyzing {len(args.files)} license files...[/cyan]"
