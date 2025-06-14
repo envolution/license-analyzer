@@ -197,9 +197,9 @@ SOFTWARE."""
     def test_get_embedding_computation_and_cache_update(self, mock_save_db, mock_transformer):
         """Test _get_embedding computes and caches embedding."""
         mock_model = Mock()
+        # Encode returns a 1D array for a single input text
+        mock_model.encode.return_value = np.array([0.5, 0.6, 0.7], dtype=np.float32) 
         mock_transformer.return_value = mock_model
-        # Encode returns a 2D array (batch_size, embedding_dim)
-        mock_model.encode.return_value = np.array([[0.5, 0.6, 0.7]], dtype=np.float32)
 
         # Pre-populate the _licenses_db as it would be after _update_database
         self.db._licenses_db = {
@@ -218,9 +218,10 @@ SOFTWARE."""
         embedding = self.db._get_embedding(mit_entry)
         
         # Verify embedding was computed
-        # Corrected assertion to expect 2D array
-        np.testing.assert_array_almost_equal(embedding, np.array([[0.5, 0.6, 0.7]]))
-        self.assertEqual(mit_entry.embedding, [0.5, 0.6, 0.7]) # Check that the entry itself was updated
+        # Assert against a 1D array, and use almost_equal for floats
+        np.testing.assert_array_almost_equal(embedding, np.array([0.5, 0.6, 0.7]))
+        # The stored embedding is the result of .tolist(), so it's a Python list
+        np.testing.assert_array_almost_equal(np.array(mit_entry.embedding), np.array([0.5, 0.6, 0.7]))
 
         # Verify SentenceTransformer.encode was called
         mock_model.encode.assert_called_once_with(self.mit_content)
@@ -229,7 +230,8 @@ SOFTWARE."""
         mock_save_db.assert_called_once()
         saved_db_data = mock_save_db.call_args[0][0]
         self.assertIn("MIT", saved_db_data)
-        self.assertEqual(saved_db_data["MIT"]["embedding"], [0.5, 0.6, 0.7])
+        # Verify stored embedding in saved data (it will be a list of floats)
+        np.testing.assert_array_almost_equal(np.array(saved_db_data["MIT"]["embedding"]), np.array([0.5, 0.6, 0.7]))
 
 
 class TestLicenseAnalyzer(unittest.TestCase):
@@ -262,7 +264,7 @@ class TestLicenseAnalyzer(unittest.TestCase):
 
         self.mock_model = Mock()
         # Ensure encode returns a numpy array with shape (1, embedding_dim)
-        self.mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]], dtype=np.float32)
+        self.mock_model.encode.return_value = np.array([0.1, 0.2, 0.3], dtype=np.float32) # 1D array
         self.mock_transformer_class.return_value = self.mock_model
 
         # Ensure cos_sim returns a 2D numpy array
@@ -301,7 +303,7 @@ class TestLicenseAnalyzer(unittest.TestCase):
     def test_analyze_text_exact_sha_match(self, mock_get_embedding):
         """Test analyzing text with exact SHA256 match."""
         # Setup mock_get_embedding to return a dummy array if called (shouldn't be for SHA match)
-        mock_get_embedding.return_value = np.array([[0.9, 0.8, 0.7]]) # 2D array
+        mock_get_embedding.return_value = np.array([0.9, 0.8, 0.7]) # 1D array
 
         # Analyze text that is an exact SHA256 match
         # Using top_n=1 to ensure embedding calculation for *other* DB entries is skipped
@@ -356,11 +358,11 @@ class TestLicenseAnalyzer(unittest.TestCase):
         non_exact_text = "This is a license that is similar to MIT but not identical."
         
         # Configure the mock SentenceTransformer to encode the input text
-        self.mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]], dtype=np.float32)
+        self.mock_model.encode.return_value = np.array([0.1, 0.2, 0.3], dtype=np.float32) # 1D array
         # Configure cos_sim for the non-exact match
         self.mock_util.cos_sim.return_value = np.array([[0.75]])
         # Ensure _get_embedding is called and returns an embedding for existing licenses
-        mock_get_embedding.return_value = np.array([[0.9, 0.8, 0.7]], dtype=np.float32) # 2D array
+        mock_get_embedding.return_value = np.array([0.9, 0.8, 0.7], dtype=np.float32) # 1D array
 
         # Test with a mock callback for per-entry embedding progress
         mock_per_entry_embed_callback = Mock()
@@ -400,12 +402,12 @@ class TestLicenseAnalyzer(unittest.TestCase):
     def test_analyze_multiple_files(self, mock_get_embedding):
         """Test analyzing multiple files with progress callback."""
         # Set up a dummy embedding for _get_embedding (called for DB entries)
-        mock_get_embedding.return_value = np.array([[0.9, 0.8, 0.7]]) # 2D array
+        mock_get_embedding.return_value = np.array([0.9, 0.8, 0.7]) # 1D array
 
         # Configure mock_model.encode for the input file texts
         self.mock_model.encode.side_effect = [
-            np.array([[0.1, 0.2, 0.3]]), # For file1 content
-            np.array([[0.4, 0.5, 0.6]]), # For file2 content
+            np.array([0.1, 0.2, 0.3]), # For file1 content
+            np.array([0.4, 0.5, 0.6]), # For file2 content
         ]
         # Configure mock_util.cos_sim for comparisons
         # 3 DB licenses * 2 input files = 6 comparisons in total, each results in one cos_sim call
@@ -479,11 +481,15 @@ class TestConvenienceFunctions(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.spdx_dir = Path(self.temp_dir) / "spdx"
         # The default cache_dir used by LicenseAnalyzer when not explicitly passed
+        # This needs to be correctly identified for the assertion
         self.default_cache_base_dir = Path(user_cache_dir(appname="license-analyzer", appauthor="envolution"))
         self.default_db_cache_dir = self.default_cache_base_dir / "db_cache" 
-        
+        self.default_spdx_data_dir = self.default_cache_base_dir / "spdx"
+
         self.spdx_dir.mkdir(parents=True)
-        self.default_db_cache_dir.mkdir(parents=True, exist_ok=True) # Ensure default cache dir exists if it's used
+        # Ensure default cache directories exist because LicenseAnalyzer's __init__ will try to create them
+        self.default_db_cache_dir.mkdir(parents=True, exist_ok=True)
+        self.default_spdx_data_dir.mkdir(parents=True, exist_ok=True)
 
         self.mit_content = "MIT License\n\nTest content for convenience function"
         # Create license file without .txt suffix as updater would
@@ -498,14 +504,14 @@ class TestConvenienceFunctions(unittest.TestCase):
         self.mock_util = self.patcher_util.start()
 
         self.mock_model = Mock()
-        self.mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]], dtype=np.float32)
+        self.mock_model.encode.return_value = np.array([0.1, 0.2, 0.3], dtype=np.float32) # 1D array
         self.mock_transformer_class.return_value = self.mock_model
         self.mock_util.cos_sim.return_value = np.array([[0.95]])
 
         # Patch _get_embedding as convenience functions will trigger this during analysis
         self.patcher_get_embedding = patch("license_analyzer.core.LicenseDatabase._get_embedding")
         self.mock_get_embedding = self.patcher_get_embedding.start()
-        self.mock_get_embedding.return_value = np.array([[0.9, 0.8, 0.7]], dtype=np.float32) # 2D array
+        self.mock_get_embedding.return_value = np.array([0.9, 0.8, 0.7], dtype=np.float32) # 1D array
 
     def tearDown(self):
         self.patcher_transformer.stop()
@@ -513,6 +519,9 @@ class TestConvenienceFunctions(unittest.TestCase):
         self.patcher_get_embedding.stop()
         # Clean up only the temp dir created for spdx files, not the default appdirs cache.
         shutil.rmtree(self.temp_dir)
+        # Also clean up the default cache directories to ensure test isolation between runs
+        if self.default_cache_base_dir.exists():
+            shutil.rmtree(self.default_cache_base_dir)
 
     @patch("license_analyzer.core.LicenseAnalyzer") # Patch the class that convenience func instantiates
     def test_analyze_license_file_function(self, mock_analyzer_class):
@@ -526,16 +535,16 @@ class TestConvenienceFunctions(unittest.TestCase):
         test_file = Path(self.temp_dir) / "test_input_file.txt"
         test_file.write_text("test content")
 
+        # The `spdx_dir` argument to `analyze_license_file` maps directly to `LicenseAnalyzer`'s `spdx_dir`.
+        # Other arguments are NOT passed by the convenience function, so `LicenseAnalyzer` uses its own internal defaults.
         matches = analyze_license_file(test_file, top_n=3, spdx_dir=self.spdx_dir)
 
-        # Analyzer should be initialized with correct args including default cache_dir and callbacks
-        # Corrected assertion: convenience functions only pass spdx_dir and let others default.
-        # db_progress_callback will be None as it's not passed.
+        # Analyzer should be initialized with correct args
         mock_analyzer_class.assert_called_once_with(
-            spdx_dir=self.spdx_dir,
-            cache_dir=self.default_db_cache_dir, # Expected default from appdirs
-            embedding_model_name="all-MiniLM-L6-v2", # Expected default
-            db_progress_callback=None # Expected default (not passed by convenience func)
+            spdx_dir=self.spdx_dir, # This is the argument passed
+            cache_dir=None, # This is the default passed (None) by `analyze_license_file` as it doesn't specify it
+            embedding_model_name="all-MiniLM-L6-v2", # This is the default from LicenseAnalyzer's __init__
+            db_progress_callback=None # This is the default from LicenseAnalyzer's __init__
         )
         # analyze_file should be called with top_n and the new per_entry_embed_callback (which is ANY for convenience funcs)
         mock_analyzer_instance.analyze_file.assert_called_once_with(test_file, 3, per_entry_embed_callback=unittest.mock.ANY)
@@ -556,10 +565,10 @@ class TestConvenienceFunctions(unittest.TestCase):
 
         # Corrected assertion for LicenseAnalyzer arguments
         mock_analyzer_class.assert_called_once_with(
-            spdx_dir=self.spdx_dir,
-            cache_dir=self.default_db_cache_dir, # Expected default from appdirs
-            embedding_model_name="all-MiniLM-L6-v2", # Expected default
-            db_progress_callback=None # Expected default (not passed by convenience func)
+            spdx_dir=self.spdx_dir, # This is the argument passed
+            cache_dir=None, # This is the default passed (None) by `analyze_license_text` as it doesn't specify it
+            embedding_model_name="all-MiniLM-L6-v2", # Default from LicenseAnalyzer's __init__
+            db_progress_callback=None # Default from LicenseAnalyzer's __init__
         )
         mock_analyzer_instance.analyze_text.assert_called_once_with(test_text, 5, per_entry_embed_callback=unittest.mock.ANY)
         self.assertEqual(len(matches), 1)
@@ -620,15 +629,14 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
         self.mock_util = self.patcher_util.start()
 
         self.mock_model = Mock()
-        # Mock encode to return a 2D numpy array (batch_size, embedding_dim)
-        # Use side_effect to return different embeddings based on input content
+        # Mock encode to return a 1D numpy array (for a single sentence)
         def mock_encode_side_effect(text):
             if "MIT License" in text:
-                return np.array([[0.1, 0.2, 0.3]], dtype=np.float32)
+                return np.array([0.1, 0.2, 0.3], dtype=np.float32)
             elif "Apache License" in text:
-                return np.array([[0.4, 0.5, 0.6]], dtype=np.float32)
+                return np.array([0.4, 0.5, 0.6], dtype=np.float32)
             else: # For any other content that might be encoded
-                return np.array([[0.7, 0.8, 0.9]], dtype=np.float32)
+                return np.array([0.7, 0.8, 0.9], dtype=np.float32)
 
         self.mock_model.encode.side_effect = mock_encode_side_effect
         
@@ -682,11 +690,11 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
         # returns the pre-defined embeddings for the database entries.
         # This patch allows us to control the embeddings returned for the DB entries.
         with patch.object(LicenseDatabase, '_get_embedding') as mock_get_embedding:
-            # Set up side_effect for mock_get_embedding to return 2D arrays
-            # Corrected: Use a list for side_effect for sequential calls
+            # Set up side_effect for mock_get_embedding to return 1D arrays
+            # Corrected: Use a list for side_effect for sequential calls, each returns a 1D array
             mock_get_embedding.side_effect = [
-                np.array([[0.1, 0.2, 0.3]], dtype=np.float32),  # For MIT
-                np.array([[0.4, 0.5, 0.6]], dtype=np.float32)   # For Apache-2.0
+                np.array([0.1, 0.2, 0.3], dtype=np.float32),  # For MIT
+                np.array([0.4, 0.5, 0.6], dtype=np.float32)   # For Apache-2.0
             ]
             
             mock_per_entry_embed_callback = Mock() # For the analyze_text call
