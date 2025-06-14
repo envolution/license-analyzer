@@ -170,8 +170,8 @@ Examples:
 
     parser.add_argument(
         "--embedding-model",
-        default="all-MiniLM-L6-v3",
-        help="Sentence transformer model name (default: all-MiniLM-L6-v3)",
+        default="all-MiniLM-L6-v2",
+        help="Sentence transformer model name (default: all-MiniLM-L6-v2)",
     )
 
     parser.add_argument(

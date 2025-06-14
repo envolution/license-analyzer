@@ -119,7 +119,7 @@ SOFTWARE."""
         # License files are stored *without* .txt suffix by updater.py now
         (self.spdx_dir / "MIT").write_text(self.mit_content)
 
-        self.db = LicenseDatabase(self.spdx_dir, self.cache_dir, "all-MiniLM-L6-v3")
+        self.db = LicenseDatabase(self.spdx_dir, self.cache_dir, "all-MiniLM-L6-v2")
 
     def tearDown(self):
         """Clean up test fixtures."""
@@ -166,7 +166,7 @@ SOFTWARE."""
         # Access should trigger loading
         model = self.db.embedding_model
         self.assertIsNotNone(model)
-        mock_transformer.assert_called_once_with("all-MiniLM-L6-v3")
+        mock_transformer.assert_called_once_with("all-MiniLM-L6-v2")
 
         self.assertEqual(model, mock_model)
 

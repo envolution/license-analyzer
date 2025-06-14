@@ -59,7 +59,7 @@ class LicenseDatabase:
         self,
         spdx_dir: Path,  # This will now be the root of the git clone
         cache_dir: Path,
-        embedding_model_name: str = "all-MiniLM-L6-v3",
+        embedding_model_name: str = "all-MiniLM-L6-v2",
     ):
         self.spdx_dir = Path(spdx_dir)  # Root of the SPDX git clone
         # The actual text files are in a subdirectory of the git clone
@@ -368,7 +368,7 @@ class LicenseAnalyzer:
         self,
         spdx_dir: Optional[Union[str, Path]] = None,
         cache_dir: Optional[Union[str, Path]] = None,
-        embedding_model_name: str = "all-MiniLM-L6-v3",
+        embedding_model_name: str = "all-MiniLM-L6-v2",
         db_progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ):
         """
