@@ -24,11 +24,11 @@ class TestLicenseMatch(unittest.TestCase):
     def test_valid_match(self):
         """Test creating a valid LicenseMatch."""
         match = LicenseMatch(
-            name="MIT.txt",
+            name="MIT",
             score=0.95,
             method=MatchMethod.EMBEDDING,
         )
-        self.assertEqual(match.name, "MIT.txt")
+        self.assertEqual(match.name, "MIT")
         self.assertEqual(match.score, 0.95)
         self.assertEqual(match.method, MatchMethod.EMBEDDING)
 
@@ -49,13 +49,13 @@ class TestDatabaseEntry(unittest.TestCase):
     def test_database_entry_creation(self):
         """Test creating a DatabaseEntry."""
         entry = DatabaseEntry(
-            name="MIT.txt",
+            name="MIT",
             sha256="abcd1234",
             fingerprint="efgh5678",
             embedding=[0.1, 0.2, 0.3],
             file_path=Path("/test/MIT.txt"),
         )
-        self.assertEqual(entry.name, "MIT.txt")
+        self.assertEqual(entry.name, "MIT")
         self.assertEqual(entry.sha256, "abcd1234")
         self.assertEqual(entry.fingerprint, "efgh5678")
         self.assertEqual(entry.embedding, [0.1, 0.2, 0.3])
@@ -149,12 +149,12 @@ SOFTWARE."""
         # Access databases to trigger loading
         licenses_db = self.db.licenses_db
 
-        self.assertIn("MIT.txt", licenses_db)
+        self.assertIn("MIT", licenses_db)
 
         # Check database entry structure
-        mit_entry = licenses_db["MIT.txt"]
+        mit_entry = licenses_db["MIT"]
         self.assertIsInstance(mit_entry, DatabaseEntry)
-        self.assertEqual(mit_entry.name, "MIT.txt")
+        self.assertEqual(mit_entry.name, "MIT")
         self.assertIsNotNone(mit_entry.sha256)
         self.assertIsNotNone(mit_entry.fingerprint)
 
@@ -395,7 +395,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
         # Should find exact match
         exact_matches = [m for m in matches if m.score == 1.0]
         self.assertGreater(len(exact_matches), 0)
-        self.assertEqual(exact_matches[0].name, "MIT.txt")
+        self.assertEqual(exact_matches[0].name, "MIT")
         self.assertEqual(exact_matches[0].method, MatchMethod.SHA256)
 
         # Test similarity match
