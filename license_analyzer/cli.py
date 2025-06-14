@@ -76,7 +76,7 @@ def format_text_output(file_path: str, matches: List[LicenseMatch]) -> str:
             )
             output.append(
                 f"[cyan]{match.name:<30}[/cyan] score: [{score_color}]{match.score:.4f}[/{score_color}]  "
-                f"method: [magenta]{match.method.value}[/magenta]  type: [blue]{match.license_type}[/blue]"
+                f"method: [magenta]{match.method.value}[/magenta]"
             )
     else:
         output.append("[italic yellow]No matches found.[/italic yellow]")
@@ -94,7 +94,6 @@ def format_json_output(results: dict) -> str:
                 "name": match.name,
                 "score": match.score,
                 "method": match.method.value,
-                "license_type": match.license_type,
             }
             for match in matches
         ]
@@ -109,8 +108,7 @@ def format_csv_output(results: dict) -> str:
     for file_path, matches in results.items():
         for match in matches:
             lines.append(
-                f'"{file_path}","{match.name}",{match.score},'
-                f"{match.method.value},{match.license_type}"
+                f'"{file_path}","{match.name}",{match.score},{match.method.value}'
             )
 
     return "\n".join(lines)
@@ -347,8 +345,8 @@ Examples:
             if args.verbose:
                 stats = analyzer.get_database_stats()
                 console.print(
-                    f"\n[bold magenta]Database stats:[/bold magenta] [blue]{stats['licenses']}[/blue] licenses, "
-                    f"[blue]{stats['exceptions']}[/blue] exceptions ([blue]{stats['total']}[/blue] total)",
+                    f"\n[bold magenta]Database stats:[/bold magenta] "
+                    f"[blue]{stats['total_licenses']}[/blue] licenses loaded.",
                 )
 
     except Exception as e:

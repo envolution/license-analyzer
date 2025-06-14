@@ -33,7 +33,6 @@ class LicenseMatch:
     name: str
     score: float
     method: MatchMethod
-    license_type: str = "license"  # "license" or "exception"
 
     def __post_init__(self):
         """Validate score range."""
@@ -63,7 +62,6 @@ class LicenseDatabase:
         embedding_model_name: str = "all-MiniLM-L6-v2",
     ):
         self.spdx_dir = Path(spdx_dir)
-        self.exceptions_dir = self.spdx_dir / "exceptions"
         self.cache_dir = Path(cache_dir)  # This is for internal database JSONs
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -71,10 +69,8 @@ class LicenseDatabase:
         self._embedding_model = None
 
         self.licenses_db_path = self.cache_dir / "licenses.json"
-        self.exceptions_db_path = self.cache_dir / "exceptions.json"
 
         self._licenses_db: Optional[Dict[str, DatabaseEntry]] = None
-        self._exceptions_db: Optional[Dict[str, DatabaseEntry]] = None
 
         self.logger = logging.getLogger(__name__)
 
@@ -284,30 +280,10 @@ class LicenseDatabase:
             )
         return self._licenses_db
 
-    @property
-    def exceptions_db(self) -> Dict[str, DatabaseEntry]:
-        """Get exceptions database, updating if necessary."""
-        # Similar to licenses_db, this is bypassed by Analyzer's explicit init
-        if self._exceptions_db is None:
-            self.logger.warning(
-                "LicenseDatabase.exceptions_db accessed before explicit initialization in Analyzer."
-            )
-            self._exceptions_db = self._update_database(
-                self.exceptions_dir, self.exceptions_db_path, "exceptions"
-            )
-        return self._exceptions_db
-
-    def get_all_entries(self) -> Dict[str, Tuple[DatabaseEntry, str]]:
-        """Get all database entries with their types."""
-        all_entries = {}
-
-        for name, entry in self.licenses_db.items():
-            all_entries[name] = (entry, "license")
-
-        for name, entry in self.exceptions_db.items():
-            all_entries[name] = (entry, "exception")
-
-        return all_entries
+    def get_all_entries(self) -> Dict[str, DatabaseEntry]:  # Return type changed
+        """Get all database entries."""
+        # SIMPLIFIED LOGIC:
+        return self.licenses_db
 
 
 class LicenseAnalyzer:
@@ -358,13 +334,6 @@ class LicenseAnalyzer:
         self.logger.info("Initializing licenses database...")
         self.db._licenses_db = self.db._update_database(
             self.db.spdx_dir, self.db.licenses_db_path, "licenses", db_progress_callback
-        )
-        self.logger.info("Initializing exceptions database...")
-        self.db._exceptions_db = self.db._update_database(
-            self.db.exceptions_dir,
-            self.db.exceptions_db_path,
-            "exceptions",
-            db_progress_callback,
         )
 
     def analyze_file(
@@ -424,7 +393,6 @@ class LicenseAnalyzer:
                         name=name,
                         score=1.0,
                         method=MatchMethod.SHA256,
-                        license_type=entry_type,
                     )
                 )
             elif text_fingerprint == entry.fingerprint:
@@ -433,7 +401,6 @@ class LicenseAnalyzer:
                         name=name,
                         score=1.0,
                         method=MatchMethod.FINGERPRINT,
-                        license_type=entry_type,
                     )
                 )
 
@@ -468,7 +435,7 @@ class LicenseAnalyzer:
 
                 text_embedding = self.db.embedding_model.encode(text)
 
-                for name, (entry, entry_type) in all_entries.items():
+                for name, entry in all_entries.items():
                     # Skip if already in perfect matches (only necessary if perfect_matches is passed into this loop)
                     # Currently, `all_entries` is fixed, so this check is valid.
                     if any(
@@ -488,7 +455,6 @@ class LicenseAnalyzer:
                                 name=name,
                                 score=similarity,
                                 method=MatchMethod.EMBEDDING,
-                                license_type=entry_type,
                             )
                         )
                     except Exception as e:
@@ -558,11 +524,7 @@ class LicenseAnalyzer:
 
     def get_database_stats(self) -> Dict[str, int]:
         """Get statistics about the license database."""
-        return {
-            "licenses": len(self.db.licenses_db),
-            "exceptions": len(self.db.exceptions_db),
-            "total": len(self.db.licenses_db) + len(self.db.exceptions_db),
-        }
+        return {"total_licenses": len(self.db.licenses_db)}
 
 
 # Convenience functions for backward compatibility
