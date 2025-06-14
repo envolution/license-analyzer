@@ -1,4 +1,3 @@
-
 # license_analyzer/cli.py
 #!/usr/bin/env python3
 """
@@ -55,7 +54,7 @@ console = Console()
 
 # Configure logging to use RichHandler for better output in verbose mode
 logging.basicConfig(
-    level=logging.INFO, # Default to INFO, can be WARNING if not verbose
+    level=logging.INFO,  # Default to INFO, can be WARNING if not verbose
     format="%(message)s",
     handlers=[
         RichHandler(console=console, show_time=True, show_level=True, show_path=False)
@@ -108,7 +107,9 @@ def format_json_output(results: dict) -> str:
 
 def format_csv_output(results: dict) -> str:
     """Format results as CSV."""
-    lines = ["file_path,license_name,score,method"] # Removed 'license_type' as it's not present in Match
+    lines = [
+        "file_path,license_name,score,method"
+    ]  # Removed 'license_type' as it's not present in Match
 
     for file_path, matches in results.items():
         for match in matches:
@@ -213,18 +214,19 @@ Examples:
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
-            "[progress.percentage]{task.percentage:>3.0f}%", # Percentage
+            "[progress.percentage]{task.percentage:>3.0f}%",  # Percentage
             "•",
             TimeElapsedColumn(),
             "•",
-            TransferSpeedColumn(), # Download speed
+            TransferSpeedColumn(),  # Download speed
             "•",
-            TimeRemainingColumn(), # Time remaining for downloads
+            TimeRemainingColumn(),  # Time remaining for downloads
             console=console,
             transient=True,  # Hide progress bar when done
         ) as progress:
             updater_task_id = progress.add_task(
-                "[cyan]Checking for license updates...", total=None # Start as indeterminate
+                "[cyan]Checking for license updates...",
+                total=None,  # Start as indeterminate
             )
 
             def updater_progress_callback(current, total, status_msg):
@@ -232,22 +234,28 @@ Examples:
                 # If total > 0, it's determinate progress (downloading, extracting files)
                 progress.update(
                     updater_task_id,
-                    total=total if total > 0 else None, # Set total to None for indeterminate spinner
+                    total=total
+                    if total > 0
+                    else None,  # Set total to None for indeterminate spinner
                     completed=current,
-                    description=f"[cyan]{status_msg}", # status_msg is plain text from updater
+                    description=f"[cyan]{status_msg}",  # status_msg is plain text from updater
                 )
-                
+
             # Perform the update check
             # This call will use the updater_progress_callback for its updates
             update_performed, update_message = updater.check_for_updates(
                 force=args.update, progress_callback=updater_progress_callback
             )
-            
+
             # Ensure the task is completed or removed, especially if it was indeterminate
             if progress.tasks[updater_task_id].total is None:
-                progress.update(updater_task_id, total=1, completed=1, description=f"[cyan]{update_message}")
-            progress.remove_task(updater_task_id) # Explicitly remove for clean exit
-
+                progress.update(
+                    updater_task_id,
+                    total=1,
+                    completed=1,
+                    description=f"[cyan]{update_message}",
+                )
+            progress.remove_task(updater_task_id)  # Explicitly remove for clean exit
 
         if update_message:
             console.print(
@@ -303,34 +311,42 @@ Examples:
             if len(file_paths_to_analyze) == 1:
                 # For a single file, a simple Status spinner is more elegant
                 file_path = file_paths_to_analyze[0]
+
                 # Using Live for Status to ensure it cleans up correctly even on errors
-                with Live(
+                with Status(
                     f"[cyan]Analyzing [bold]{file_path.name}[/bold]...",
                     spinner="moon",
                     console=console,
-                    refresh_per_second=4,
-                    transient=True,
-                ) as live_status:
+                ) as status_message:
                     # Define a dummy per_entry_embed_callback to update the Status message
                     def per_entry_embed_callback(status_msg: str):
-                        live_status.update(f"[cyan]Analyzing [bold]{file_path.name}[/bold]: {status_msg}")
+                        status_message.update(
+                            f"[cyan]Analyzing [bold]{file_path.name}[/bold]: {status_msg}"
+                        )
 
-                    matches = analyzer.analyze_file(file_path, args.top_n, per_entry_embed_callback=per_entry_embed_callback)
+                    matches = analyzer.analyze_file(
+                        file_path,
+                        args.top_n,
+                        per_entry_embed_callback=per_entry_embed_callback,
+                    )
                     matches = [m for m in matches if m.score >= args.min_score]
                     results = {str(file_path): matches}
-                console.print("\n") # Newline after single file analysis status
+                console.print("\n")  # Newline after single file analysis status
             else:
                 # For multiple files, use a Progress bar
                 with Progress(
                     SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"), # This will show the dynamic messages
+                    TextColumn(
+                        "[progress.description]{task.description}"
+                    ),  # This will show the dynamic messages
                     BarColumn(),
                     "{task.completed} of {task.total}",
                     console=console,
                     transient=True,
                 ) as analysis_progress:
                     analysis_task = analysis_progress.add_task(
-                        "[cyan]Analyzing license files...", total=len(file_paths_to_analyze)
+                        "[cyan]Analyzing license files...",
+                        total=len(file_paths_to_analyze),
                     )
 
                     def analysis_progress_callback(current, total, status_msg):
@@ -352,7 +368,6 @@ Examples:
                             m for m in results[file_path] if m.score >= args.min_score
                         ]
                 console.print("[bold green]✔ Finished analyzing files.[/bold green]")
-
 
             # Analysis done, print results
             console.print("\n")  # Add a newline after progress bar for cleaner output
@@ -382,4 +397,3 @@ Examples:
     except Exception as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         sys.exit(1)
-
