@@ -301,7 +301,7 @@ class TestConvenienceFunctions(unittest.TestCase):
         """Test analyze_license_text convenience function."""
         mock_analyzer = Mock()
         mock_analyzer.analyze_text.return_value = [
-            LicenseMatch("MIT.txt", 0.95, MatchMethod.EMBEDDING)
+            LicenseMatch("MIT", 0.95, MatchMethod.EMBEDDING)
         ]
         mock_analyzer_class.return_value = mock_analyzer
 
