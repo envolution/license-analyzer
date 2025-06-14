@@ -552,10 +552,11 @@ class TestConvenienceFunctions(unittest.TestCase):
         # Analyzer should be initialized with only the spdx_dir argument passed by the convenience func.
         # The other arguments default to None if not explicitly passed.
         mock_analyzer_class.assert_called_once_with(
-            spdx_dir=self.spdx_dir,
+            spdx_dir=self.spdx_dir, # This is the argument passed
+            # No other arguments are passed by analyze_license_file, so don't assert them here
         )
-        # analyze_file should be called with top_n and the new per_entry_embed_callback (which is ANY for convenience funcs)
-        mock_analyzer_instance.analyze_file.assert_called_once_with(test_file, 3, per_entry_embed_callback=unittest.mock.ANY)
+        # analyze_file should be called with top_n, and per_entry_embed_callback is NOT passed by convenience func
+        mock_analyzer_instance.analyze_file.assert_called_once_with(test_file, 3) # Removed per_entry_embed_callback=ANY
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].name, "MIT")
 
@@ -574,8 +575,9 @@ class TestConvenienceFunctions(unittest.TestCase):
         # Analyzer should be initialized with only the spdx_dir argument passed by the convenience func.
         mock_analyzer_class.assert_called_once_with(
             spdx_dir=self.spdx_dir,
+            # No other arguments are passed by analyze_license_text
         )
-        mock_analyzer_instance.analyze_text.assert_called_once_with(test_text, 5, per_entry_embed_callback=unittest.mock.ANY)
+        mock_analyzer_instance.analyze_text.assert_called_once_with(test_text, 5) # Removed per_entry_embed_callback=ANY
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].name, "MIT")
 
