@@ -1,12 +1,12 @@
 pkgname=python-license-analyzer-git
 _pkgname=license-analyzer
-pkgver=0.0.1
+pkgver=0.0.1+r38+gb54ae4b
 pkgrel=1
 pkgdesc="compare against SPDX licenses using sha256/fingerprinting/semantic embeddings"
 arch=('any')
 url='https://github.com/envolution/license-analyzer'
 license=(Apache-2.0)
-depends=(python python-numpy python-sentence-transformers pytorch python-transformers)
+depends=(python python-numpy python-sentence-transformers python-pytorch python-transformers)
 makedepends=(
   python-build
   python-installer
@@ -28,7 +28,7 @@ build() {
 
 check() {
   cd $_pkgname
-  PYTHONPATH=src python -m pytest tests/
+  PYTHONPATH="$PWD" python -m pytest
 }
 
 package() {
