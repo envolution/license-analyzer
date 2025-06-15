@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "license-analyzer"
-version = "0.0.2"
+version = "0.0.3"
 authors = [{ name = "envolution", email = "involution@gmail.com" }]
 description = "A robust Python module for analyzing and comparing software licenses"
 readme = "README.md"

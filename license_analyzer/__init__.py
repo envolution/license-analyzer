@@ -9,4 +9,4 @@ from .core import analyze_license_file, analyze_license_text  # Convenience func
 from .updater import LicenseUpdater  # NEW import
 
 # Define package version
-__version__ = "0.0.2"  # Keep in sync with pyproject.toml
+__version__ = "0.0.3"  # Keep in sync with pyproject.toml

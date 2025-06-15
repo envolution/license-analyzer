@@ -3,7 +3,7 @@ import tempfile
 import json
 import shutil
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, call, ANY # Import ANY
+from unittest.mock import Mock, patch, MagicMock, call, ANY  # Import ANY
 import numpy as np
 from datetime import datetime, UTC
 from appdirs import user_cache_dir
@@ -69,12 +69,8 @@ class TestDatabaseEntry(unittest.TestCase):
         self.assertEqual(entry.fingerprint, "efgh5678")
         self.assertEqual(entry.embedding, [0.1, 0.2, 0.3])
         self.assertEqual(entry.file_path, Path("/test/MIT.txt"))
-        self.assertIsInstance(
-            datetime.fromisoformat(entry.updated), datetime
-        )
-        self.assertTrue(
-            entry.updated.endswith("+00:00") or entry.updated.endswith("Z")
-        )
+        self.assertIsInstance(datetime.fromisoformat(entry.updated), datetime)
+        self.assertTrue(entry.updated.endswith("+00:00") or entry.updated.endswith("Z"))
 
 
 class TestLicenseDatabase(unittest.TestCase):
@@ -124,9 +120,11 @@ SOFTWARE."""
             "licenseListVersion": "test_version_1.0",
             "licenses": [
                 {"licenseId": "MIT", "name": "MIT License", "isOsiApproved": True}
-            ]
+            ],
         }
-        (self.spdx_json_dir / "licenses.json").write_text(json.dumps(dummy_licenses_json))
+        (self.spdx_json_dir / "licenses.json").write_text(
+            json.dumps(dummy_licenses_json)
+        )
 
         self.db = LicenseDatabase(self.spdx_dir, self.cache_dir, "all-MiniLM-L6-v2")
 
@@ -197,7 +195,9 @@ SOFTWARE."""
         self.assertIsNone(mit_entry.embedding)
 
         mock_progress_callback.assert_any_call(0, 1, "Processing licenses: MIT")
-        mock_progress_callback.assert_any_call(1, 1, "Finished licenses database update.")
+        mock_progress_callback.assert_any_call(
+            1, 1, "Finished licenses database update."
+        )
 
         mock_save_db.assert_called_once()
         saved_db_data = mock_save_db.call_args[0][0]
@@ -228,7 +228,9 @@ SOFTWARE."""
         raw_db_from_file = self.db._load_existing_db(self.licenses_db_path)
         # file_path needs to include .txt here since that's how it's created in setup
         self.db._licenses_db = {
-            name: DatabaseEntry(name=name, file_path=self.spdx_text_dir / f"{name}.txt", **data)
+            name: DatabaseEntry(
+                name=name, file_path=self.spdx_text_dir / f"{name}.txt", **data
+            )
             for name, data in raw_db_from_file.items()
         }
 
@@ -266,11 +268,10 @@ class TestLicenseAnalyzer(unittest.TestCase):
 
         self.spdx_json_dir = self.spdx_dir / "json"
         self.spdx_json_dir.mkdir(exist_ok=True)
-        dummy_licenses_json = {
-            "licenseListVersion": "test_version_1.0",
-            "licenses": []
-        }
-        (self.spdx_json_dir / "licenses.json").write_text(json.dumps(dummy_licenses_json))
+        dummy_licenses_json = {"licenseListVersion": "test_version_1.0", "licenses": []}
+        (self.spdx_json_dir / "licenses.json").write_text(
+            json.dumps(dummy_licenses_json)
+        )
 
         self.cache_dir.mkdir(parents=True)
 
@@ -313,9 +314,7 @@ class TestLicenseAnalyzer(unittest.TestCase):
     def test_analyzer_initialization(self):
         """Test LicenseAnalyzer initializes and updates database correctly."""
         self.mock_db_progress_callback.assert_called()
-        self.assertEqual(
-            len(self.analyzer.db.licenses_db), 3
-        )
+        self.assertEqual(len(self.analyzer.db.licenses_db), 3)
 
         self.assertEqual(self.mock_model.encode.call_count, 0)
 
@@ -369,7 +368,9 @@ class TestLicenseAnalyzer(unittest.TestCase):
         """Test analyzing text with embedding match when no exact match."""
         non_exact_text = "This is a license that is similar to MIT but not identical."
 
-        self.mock_model.encode.return_value = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+        self.mock_model.encode.return_value = np.array(
+            [0.1, 0.2, 0.3], dtype=np.float32
+        )
         self.mock_util.cos_sim.return_value = np.array([[0.75]])
         mock_get_embedding.return_value = np.array([0.9, 0.8, 0.7], dtype=np.float32)
 
@@ -451,9 +452,15 @@ class TestLicenseAnalyzer(unittest.TestCase):
 
         mock_analysis_progress_callback.assert_called()
         self.assertEqual(mock_analysis_progress_callback.call_args[0][1], 2)
-        mock_analysis_progress_callback.assert_any_call(1, 2, f"Analyzing {file1_path.name}")
-        mock_analysis_progress_callback.assert_any_call(2, 2, f"Analyzing {file2_path.name}")
-        mock_analysis_progress_callback.assert_any_call(2, 2, "Finished analyzing files.")
+        mock_analysis_progress_callback.assert_any_call(
+            1, 2, f"Analyzing {file1_path.name}"
+        )
+        mock_analysis_progress_callback.assert_any_call(
+            2, 2, f"Analyzing {file2_path.name}"
+        )
+        mock_analysis_progress_callback.assert_any_call(
+            2, 2, "Finished analyzing files."
+        )
 
         file1_matches = results[str(file1_path)]
         self.assertEqual(len(file1_matches), 2)
@@ -485,11 +492,10 @@ class TestConvenienceFunctions(unittest.TestCase):
         self.spdx_text_dir.mkdir(exist_ok=True)
         self.spdx_json_dir = self.spdx_dir / "json"
         self.spdx_json_dir.mkdir(exist_ok=True)
-        dummy_licenses_json = {
-            "licenseListVersion": "test_version_1.0",
-            "licenses": []
-        }
-        (self.spdx_json_dir / "licenses.json").write_text(json.dumps(dummy_licenses_json))
+        dummy_licenses_json = {"licenseListVersion": "test_version_1.0", "licenses": []}
+        (self.spdx_json_dir / "licenses.json").write_text(
+            json.dumps(dummy_licenses_json)
+        )
 
         self.default_db_cache_dir.mkdir(parents=True, exist_ok=True)
         self.default_spdx_data_dir.mkdir(parents=True, exist_ok=True)
@@ -543,14 +549,9 @@ class TestConvenienceFunctions(unittest.TestCase):
 
         mock_analyzer_class.assert_called_once_with(
             spdx_dir=self.spdx_dir,
-            cache_dir=ANY, # Use ANY for dynamically computed default path
-            embedding_model_name="all-MiniLM-L6-v3",
-            db_progress_callback=None
         )
         # Explicitly expect per_entry_embed_callback=None
-        mock_analyzer_instance.analyze_file.assert_called_once_with(
-            test_file, 3, per_entry_embed_callback=None
-        )
+        mock_analyzer_instance.analyze_file.assert_called_once_with(test_file, 3)
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].name, "MIT")
 
@@ -568,14 +569,9 @@ class TestConvenienceFunctions(unittest.TestCase):
 
         mock_analyzer_class.assert_called_once_with(
             spdx_dir=self.spdx_dir,
-            cache_dir=ANY, # Use ANY for dynamically computed default path
-            embedding_model_name="all-MiniLM-L6-v3",
-            db_progress_callback=None
         )
         # Explicitly expect per_entry_embed_callback=None
-        mock_analyzer_instance.analyze_text.assert_called_once_with(
-            test_text, 5, per_entry_embed_callback=None
-        )
+        mock_analyzer_instance.analyze_text.assert_called_once_with(test_text, 5)
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].name, "MIT")
 
@@ -635,10 +631,16 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
             "licenseListVersion": "test_version_1.0",
             "licenses": [
                 {"licenseId": "MIT", "name": "MIT License", "isOsiApproved": True},
-                {"licenseId": "Apache-2.0", "name": "Apache License 2.0", "isOsiApproved": True},
-            ]
+                {
+                    "licenseId": "Apache-2.0",
+                    "name": "Apache License 2.0",
+                    "isOsiApproved": True,
+                },
+            ],
         }
-        (self.spdx_json_dir / "licenses.json").write_text(json.dumps(dummy_licenses_json))
+        (self.spdx_json_dir / "licenses.json").write_text(
+            json.dumps(dummy_licenses_json)
+        )
 
         self.patcher_transformer = patch("sentence_transformers.SentenceTransformer")
         self.patcher_util = patch("sentence_transformers.util")
