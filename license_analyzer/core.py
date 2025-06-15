@@ -412,7 +412,7 @@ class LicenseAnalyzer:
     def analyze_file(
         self,
         file_path: Union[str, Path],
-        top_n: int = 5,
+        top_n: Optional[int] = None,
         per_entry_embed_callback: Optional[Callable[[str], None]] = None,
     ) -> List[LicenseMatch]:
         """
@@ -442,7 +442,7 @@ class LicenseAnalyzer:
     def analyze_text(
         self,
         text: str,
-        top_n: int = 5,
+        top_n: Optional[int] = None,
         per_entry_embed_callback: Optional[Callable[[str], None]] = None,
     ) -> List[LicenseMatch]:
         """
@@ -501,17 +501,20 @@ class LicenseAnalyzer:
             deduplicated_perfect_matches.sort(
                 key=lambda x: x.method == MatchMethod.SHA256, reverse=True
             )
+            if top_n is not None:
+                if len(deduplicated_perfect_matches) >= top_n:
+                    return deduplicated_perfect_matches[:top_n]
+                remaining = top_n - len(deduplicated_perfect_matches)
+            else:
+                # We'll collect all top-score matches later; set flag to compute embeddings
+                remaining = True
 
-            if len(deduplicated_perfect_matches) >= top_n:
-                return deduplicated_perfect_matches[:top_n]
-            # Continue to find more matches up to top_n
-            remaining = top_n - len(deduplicated_perfect_matches)
         else:
             deduplicated_perfect_matches = []
-            remaining = top_n
+            remaining = True if top_n is None else top_n
 
         # Only compute embeddings if we need more matches
-        if remaining > 0:
+        if remaining:
             try:
                 from sentence_transformers import util
 
@@ -527,7 +530,7 @@ class LicenseAnalyzer:
                         # Report progress for per-entry embedding computation/retrieval
                         if per_entry_embed_callback:
                             per_entry_embed_callback(
-                                f"Computing embedding for {entry.name}..."
+                                f"(Updating Embeddings) => Computing {entry.name}..."
                             )
 
                         entry_embedding = self.db._get_embedding(entry)
@@ -577,6 +580,12 @@ class LicenseAnalyzer:
             ),
             reverse=True,
         )
+        if top_n is None:
+            # Return all matches tied at the top score
+            if all_matches:
+                top_score = all_matches[0].score
+                return [m for m in all_matches if m.score == top_score]
+            return []
 
         return all_matches[:top_n]
 

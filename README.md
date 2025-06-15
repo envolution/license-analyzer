@@ -1,118 +1,168 @@
-# License Analyzer
+# license-analyzer
 
-A robust Python module for analyzing and comparing software licenses using multiple matching strategies including SHA256, fingerprinting, and semantic embeddings.
+**SPDX license identification using hashes, fingerprints, and semantic similarity.**  
+Supports command-line usage as well as Python module integration.
 
-## Features
+---
 
-- **Multiple Matching Methods**: SHA256 exact matching, canonical fingerprinting, and semantic embeddings
-- **Lazy Loading**: Embedding models are only loaded when needed for performance
-- **Efficient Caching**: Automatically manages license database with incremental updates
-- **Batch Processing**: Analyze multiple license files in a single operation
-- **Flexible API**: Both object-oriented and functional interfaces
-- **Command Line Interface**: Easy-to-use CLI for quick analysis
-- **Comprehensive Testing**: Full test suite with mocking for reliable operation
-
-## Installation
+## 📦 Installation
 
 ```bash
-# Install from PyPI (when published)
 pip install license-analyzer
-
-# Or install from source
-git clone https://github.com/yourusername/license-analyzer.git
-cd license-analyzer
-pip install -e .
-
-# For development
-pip install -e .[dev]
 ```
 
-## Requirements
+To install from source (e.g., for development):
 
-- Python 3.8+
-- numpy
-- sentence-transformers (for semantic analysis)
-- torch (dependency of sentence-transformers)
+```bash
+git clone https://github.com/yourorg/license-analyzer.git
+cd license-analyzer
+pip install .
+```
 
-## Quick Start
+---
 
-### As a Library
+## 🚀 Command-Line Usage
+
+Once installed, the CLI tool is available as:
+
+```bash
+license-analyzer [OPTIONS] FILE [FILE...]
+```
+
+### 🔧 Common Options
+
+| Option | Description |
+|--------|-------------|
+| `--top-n N` | Return top N matches per file. If omitted, returns **all matches tied for highest score**. |
+| `--format {text,json,csv}` | Output format. Default is `text`. |
+| `--min-score FLOAT` | Filter out matches with a score below this threshold (default: `0.0`). |
+| `--spdx-dir DIR` | Path to SPDX license text files. Defaults to `~/.cache/license-analyzer/spdx/text`. |
+| `--cache-dir DIR` | Path to cache directory for license database. |
+| `--embedding-model NAME` | SentenceTransformer model (default: `all-MiniLM-L6-v2`). |
+| `--update, -u` | Force update of SPDX license data from GitHub. |
+| `--verbose, -v` | Show progress and debug logs. |
+
+### 📄 Examples
+
+#### Basic usage
+
+```bash
+license-analyzer LICENSE
+```
+
+#### Multiple files
+
+```bash
+license-analyzer license1.txt license2.txt
+```
+
+#### JSON output with top 3 matches
+
+```bash
+license-analyzer --format json --top-n 3 LICENSE
+```
+
+#### Force SPDX update
+
+```bash
+license-analyzer --update
+```
+
+---
+
+## 🐍 Python Module Usage
+
+You can also use `license-analyzer` directly in your Python code:
 
 ```python
-from license_analyzer import LicenseAnalyzer
+from license_analyzer.core import LicenseAnalyzer
 
-# Initialize analyzer
 analyzer = LicenseAnalyzer()
+matches = analyzer.analyze_file("LICENSE")
 
-# Analyze a single file
-matches = analyzer.analyze_file("LICENSE.txt", top_n=5)
 for match in matches:
-    print(f"{match.name}: {match.score:.4f} ({match.method.value})")
-
-# Analyze text directly
-license_text = """MIT License
-
-Copyright (c) 2024 Your Name
-
-Permission is hereby granted..."""
-
-matches = analyzer.analyze_text(license_text)
-print(f"Best match: {matches[0].name} (score: {matches[0].score:.4f})")
-
-# Analyze multiple files
-results = analyzer.analyze_multiple_files([
-    "LICENSE1.txt", 
-    "LICENSE2.txt", 
-    "LICENSE3.txt"
-])
-
-for file_path, matches in results.items():
-    print(f"\n{file_path}:")
-    for match in matches[:3]:  # Top 3 matches
-        print(f"  {match.name}: {match.score:.4f}")
+    print(match.name, match.score, match.method)
 ```
 
-### Command Line Interface
+Or, if you want to analyze text (rather than a file):
+
+```python
+text = open("LICENSE").read()
+matches = analyzer.analyze_text(text)
+
+for match in matches:
+    print(match.name, match.score, match.method)
+```
+
+Use `top_n=None` to get all tied top-scoring matches:
+
+```python
+matches = analyzer.analyze_text(text, top_n=None)
+```
+
+---
+
+## 📈 Output Format (CLI)
+
+### Text (default)
+
+```text
+Analysis results for: LICENSE
+------------------------------------------------------------
+MIT                            score: 1.0000  method: sha256
+```
+
+### JSON
+
+```json
+{
+  "LICENSE": [
+    {
+      "name": "MIT",
+      "score": 1.0,
+      "method": "sha256"
+    }
+  ]
+}
+```
+
+### CSV
+
+```csv
+file_path,license_name,score,method
+"LICENSE","MIT",1.0,"sha256"
+```
+
+---
+
+## 🔄 Updating SPDX License Data
+
+By default, license data is stored under:
+
+```
+~/.cache/license-analyzer/spdx
+```
+
+To update the SPDX license texts (from GitHub):
 
 ```bash
-# Analyze a single file
-license-analyzer LICENSE.txt
-
-# Analyze multiple files
-license-analyzer LICENSE1.txt LICENSE2.txt LICENSE3.txt
-
-# Get top 10 matches in JSON format
-license-analyzer --format json --top-n 10 LICENSE.txt
-
-# Set minimum score threshold
-license-analyzer --min-score 0.8 LICENSE.txt
-
-# Use custom SPDX directory
-license-analyzer --spdx-dir /custom/path/spdx LICENSE.txt
-
-# Verbose output with database stats
-license-analyzer --verbose LICENSE.txt
+license-analyzer --update
 ```
 
-## Architecture
+This refreshes cached licenses and triggers database rebuild if needed.
 
-### Core Components
+---
 
-1. **LicenseAnalyzer**: Main interface class
-2. **LicenseDatabase**: Manages license data with lazy loading
-3. **LicenseMatch**: Represents analysis results
-4. **DatabaseEntry**: Internal license database entry
-5. **MatchMethod**: Enumeration of matching strategies
+## 🧠 Matching Strategies
 
-### Matching Strategies
+- ✅ SHA256 Hash Match
+- ✅ Canonical Fingerprint Match
+- ✅ Semantic Embedding Match (via [sentence-transformers](https://www.sbert.net/))
 
-1. **SHA256**: Exact byte-for-byte matching (fastest, most accurate)
-2. **Fingerprint**: Canonical token-based matching (handles formatting differences)
-3. **Embedding**: Semantic similarity using sentence transformers (most flexible)
+---
 
-### Performance Optimization
+## 📝 License
 
-- **Lazy Loading**: Embedding models are only loaded when needed
-- **Incremental Updates**: Database only processes changed files
-- **Smart Matching**: Perfect matches skip expensive embedding computation
-- **Efficient Caching**: JSON-based database with SHA
+SPDX-License-Identifier: Apache-2.0
+
+---

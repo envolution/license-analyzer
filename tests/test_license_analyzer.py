@@ -482,7 +482,7 @@ class TestConvenienceFunctions(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.spdx_dir = Path(self.temp_dir) / "spdx_repo_for_convenience"
         self.default_cache_base_dir = Path(
-            user_cache_dir(appname="license-analyzer", appauthor="envolution")
+            user_cache_dir(appname="license-analyzer-tests", appauthor="envolution")
         )
         self.default_db_cache_dir = self.default_cache_base_dir / "db_cache"
         self.default_spdx_data_dir = self.default_cache_base_dir / "spdx"

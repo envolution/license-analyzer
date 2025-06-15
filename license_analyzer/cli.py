@@ -143,8 +143,7 @@ Examples:
     parser.add_argument(
         "--top-n",
         type=int,
-        default=5,
-        help="Number of top matches to return per file (default: 5)",
+        help="Number of top matches to return per file. If omitted, all tied top-scoring matches are returned.",
     )
 
     parser.add_argument(
