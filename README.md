@@ -14,7 +14,7 @@ pip install license-analyzer
 To install from source (e.g., for development):
 
 ```bash
-git clone https://github.com/yourorg/license-analyzer.git
+git clone https://github.com/envolution/license-analyzer.git
 cd license-analyzer
 pip install .
 ```
